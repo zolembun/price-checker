@@ -21,15 +21,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. เชื่อมต่อ Services
+# 1. เชื่อมต่อ Services (แก้ใหม่ให้อ่าน Secrets ง่ายขึ้น)
 # ---------------------------------------------------------
 @st.cache_resource
 def init_services():
+    # อ่านค่าจาก Secrets โดยตรง (ไม่ต้องใช้ json.loads แล้ว)
     service_account_info = st.secrets["gcp_service_account"]
     gemini_key = st.secrets["gemini_api_key"]
     
     scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly', 
               'https://www.googleapis.com/auth/drive.metadata.readonly']
+    
+    # สร้าง Credentials
     creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     
     sheets_service = build('sheets', 'v4', credentials=creds)
@@ -45,12 +48,15 @@ def init_services():
 def load_data(_sheets_service, _drive_service, spreadsheet_url):
     try:
         spreadsheet_id = spreadsheet_url.split('/d/')[1].split('/')[0]
+        
+        # ดึงเวลาแก้ไขล่าสุด
         file_meta = _drive_service.files().get(fileId=spreadsheet_id, fields="name, modifiedTime").execute()
         file_name = file_meta.get('name')
         mod_time_str = file_meta.get('modifiedTime')
         dt = datetime.strptime(mod_time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
         last_update = dt.strftime("%d/%m/%Y เวลา %H:%M น.")
         
+        # ดึงข้อมูลจาก Sheet
         sheet = _sheets_service.spreadsheets()
         result = sheet.values().get(spreadsheetId=spreadsheet_id, range="A:H").execute()
         values = result.get('values', [])
@@ -58,12 +64,12 @@ def load_data(_sheets_service, _drive_service, spreadsheet_url):
         if not values: return None, None, None
         
         df = pd.DataFrame(values[1:], columns=values[0])
-        # แปลงราคาเป็นตัวเลขรอไว้เลย เพื่อลด error
+        # แปลงราคาเป็นตัวเลข (ลบลูกน้ำออก)
         df['ราคาทุนต่อหน่วย'] = pd.to_numeric(df['ราคาทุนต่อหน่วย'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         return df, file_name, last_update
         
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาด: {str(e)}")
+        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
         return None, None, None
 
 # ---------------------------------------------------------
@@ -82,51 +88,44 @@ try:
         st.markdown(f"<div class='update-time'>📂 ไฟล์: {file_name} | 🕒 อัปเดตล่าสุด: {last_update}</div>", unsafe_allow_html=True)
         st.divider()
 
-        query = st.text_input("พิมพ์ชื่อสินค้า หรือ รหัสรุ่น", placeholder="เช่น ตู้เย็น rt20")
+        query = st.text_input("พิมพ์รหัสรุ่น หรือ ชื่อสินค้า", placeholder="เช่น RT20, EMG20, ไมโครเวฟ")
         
         if query:
-            # --- [LOGIC ใหม่: ประหยัด Token] ---
-            # 1. กรองเบื้องต้นด้วย Python (หาคำที่ตรงกันบ้าง)
-            keywords = query.lower().split()
-            # สร้างเงื่อนไข: แถวไหนที่มีคำค้นหาโผล่มาบ้าง (ในรหัส หรือ ชื่อ) เก็บไว้หมด
-            mask = pd.Series([False] * len(df))
-            for word in keywords:
-                mask |= df['รหัสสินค้า'].astype(str).str.contains(word, case=False, na=False)
-                mask |= df['รายละเอียดสินค้า'].astype(str).str.contains(word, case=False, na=False)
+            match_index = -1
+            found_by = ""
+
+            # --- ด่านที่ 1: ค้นหาด้วยรหัสรุ่น (Direct Search) ---
+            # เร็ว + ฟรี + แม่นยำ
+            search_term = query.strip()
+            direct_match = df[df['รหัสสินค้า'].astype(str).str.contains(search_term, case=False, na=False)]
             
-            filtered_df = df[mask]
+            if not direct_match.empty:
+                match_index = direct_match.index[0]
+                found_by = "⚡ เจอรหัสรุ่นนี้ในระบบ (Direct Match)"
             
-            # ถ้าไม่เจอเลย หรือเจอเยอะไป ให้เอาตัวอย่างมาสัก 50 ตัวพอ (กัน Token เต็ม)
-            if len(filtered_df) == 0:
-                candidates = df.head(50) # ถ้าหาไม่เจอเลย เอา 50 ตัวแรกให้ AI ดูเผื่อฟลุ๊ค
-            elif len(filtered_df) > 50:
-                candidates = filtered_df.head(50) # ถ้าเจอเยอะเกิน ตัดมาแค่ 50 ตัว
             else:
-                candidates = filtered_df
-            
-            # 2. ส่งให้ AI (Gemini Pro) เลือกจากรายการที่คัดมาแล้ว
-            # ใช้ gemini-pro (ที่เสถียรกว่า) ได้เลย เพราะข้อมูลส่งไปน้อยแล้ว
-            model = genai.GenerativeModel('gemini-pro')
-            
-            product_list = candidates[['รหัสสินค้า', 'รายละเอียดสินค้า']].to_string(index=True)
-            
-            prompt = f"""
-            ช่วยหาสินค้าที่ตรงกับคำค้นหา: "{query}"
-            
-            จากรายการนี้ (เลือก index ด้านหน้าสุดมา 1 เลข):
-            {product_list}
-            
-            ถ้าเจอที่ตรงหรือใกล้เคียงมากๆ ให้ตอบเลข Index มาตัวเดียว
-            ถ้าไม่เจออะไรเลย ให้ตอบ -1
-            """
-            
-            with st.spinner('AI กำลังค้นหา...'):
-                try:
-                    response = model.generate_content(prompt)
-                    match_index = int(response.text.strip())
-                except:
-                    match_index = -1
+                # --- ด่านที่ 2: ใช้ AI ช่วยหา (AI Search) ---
+                # ใช้เมื่อหาไม่เจอในรหัสรุ่น
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                product_list = df[['รหัสสินค้า', 'รายละเอียดสินค้า']].to_string(index=True)
                 
+                prompt = f"""
+                ค้นหาสินค้าจากคำว่า: "{query}"
+                ในรายการนี้:
+                {product_list}
+                
+                ตอบกลับเฉพาะตัวเลข Index รายการที่ถูกต้องที่สุดตัวเดียว ถ้าไม่เจอตอบ -1
+                """
+                
+                with st.spinner('กำลังให้ AI ช่วยวิเคราะห์ชื่อสินค้า...'):
+                    try:
+                        response = model.generate_content(prompt)
+                        match_index = int(response.text.strip())
+                        found_by = "🤖 AI ค้นพบจากการวิเคราะห์ชื่อสินค้า"
+                    except:
+                        match_index = -1
+
+            # --- แสดงผลลัพธ์ ---
             if match_index != -1 and match_index in df.index:
                 item = df.loc[match_index]
                 cost_price = item['ราคาทุนต่อหน่วย']
@@ -134,7 +133,7 @@ try:
                 model_id = item['รหัสสินค้า']
                 product_name = item['รายละเอียดสินค้า']
 
-                st.success(f"✅ พบข้อมูล: {product_name}")
+                st.success(f"✅ {found_by}: {product_name}")
                 
                 col_main, col_info = st.columns([2, 1])
                 with col_main:
@@ -179,7 +178,7 @@ try:
                         st.link_button(f"{store['name']}", store['url'], use_container_width=True)
 
             else:
-                st.warning("❌ ไม่พบสินค้า หรือสินค้าไม่ใกล้เคียงพอ")
+                st.warning(f"❌ ไม่พบข้อมูลสำหรับ: '{query}'")
 
 except Exception as e:
     st.error(f"กรุณาตั้งค่า Secrets ก่อนใช้งาน: {str(e)}")
