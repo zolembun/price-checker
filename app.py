@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import urllib.parse
 from datetime import datetime
+import re
 
 # ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="ระบบเช็คราคา & คู่แข่ง", page_icon="💰", layout="wide")
@@ -21,18 +22,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 1. เชื่อมต่อ Services (แก้ใหม่ให้อ่าน Secrets ง่ายขึ้น)
+# 1. เชื่อมต่อ Services
 # ---------------------------------------------------------
 @st.cache_resource
 def init_services():
-    # อ่านค่าจาก Secrets โดยตรง (ไม่ต้องใช้ json.loads แล้ว)
     service_account_info = st.secrets["gcp_service_account"]
     gemini_key = st.secrets["gemini_api_key"]
     
     scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly', 
               'https://www.googleapis.com/auth/drive.metadata.readonly']
-    
-    # สร้าง Credentials
     creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     
     sheets_service = build('sheets', 'v4', credentials=creds)
@@ -49,14 +47,12 @@ def load_data(_sheets_service, _drive_service, spreadsheet_url):
     try:
         spreadsheet_id = spreadsheet_url.split('/d/')[1].split('/')[0]
         
-        # ดึงเวลาแก้ไขล่าสุด
         file_meta = _drive_service.files().get(fileId=spreadsheet_id, fields="name, modifiedTime").execute()
         file_name = file_meta.get('name')
         mod_time_str = file_meta.get('modifiedTime')
         dt = datetime.strptime(mod_time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
         last_update = dt.strftime("%d/%m/%Y เวลา %H:%M น.")
         
-        # ดึงข้อมูลจาก Sheet
         sheet = _sheets_service.spreadsheets()
         result = sheet.values().get(spreadsheetId=spreadsheet_id, range="A:H").execute()
         values = result.get('values', [])
@@ -64,12 +60,11 @@ def load_data(_sheets_service, _drive_service, spreadsheet_url):
         if not values: return None, None, None
         
         df = pd.DataFrame(values[1:], columns=values[0])
-        # แปลงราคาเป็นตัวเลข (ลบลูกน้ำออก)
         df['ราคาทุนต่อหน่วย'] = pd.to_numeric(df['ราคาทุนต่อหน่วย'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         return df, file_name, last_update
         
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
+        st.error(f"เกิดข้อผิดพลาด: {str(e)}")
         return None, None, None
 
 # ---------------------------------------------------------
@@ -94,18 +89,16 @@ try:
             match_index = -1
             found_by = ""
 
-            # --- ด่านที่ 1: ค้นหาด้วยรหัสรุ่น (Direct Search) ---
-            # เร็ว + ฟรี + แม่นยำ
+            # --- ด่านที่ 1: ค้นหาด้วยรหัสรุ่น ---
             search_term = query.strip()
             direct_match = df[df['รหัสสินค้า'].astype(str).str.contains(search_term, case=False, na=False)]
             
             if not direct_match.empty:
                 match_index = direct_match.index[0]
-                found_by = "⚡ เจอรหัสรุ่นนี้ในระบบ (Direct Match)"
+                found_by = "⚡ เจอรหัสรุ่นนี้ในระบบ"
             
             else:
-                # --- ด่านที่ 2: ใช้ AI ช่วยหา (AI Search) ---
-                # ใช้เมื่อหาไม่เจอในรหัสรุ่น
+                # --- ด่านที่ 2: ใช้ AI ช่วยหา ---
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 product_list = df[['รหัสสินค้า', 'รายละเอียดสินค้า']].to_string(index=True)
                 
@@ -117,11 +110,11 @@ try:
                 ตอบกลับเฉพาะตัวเลข Index รายการที่ถูกต้องที่สุดตัวเดียว ถ้าไม่เจอตอบ -1
                 """
                 
-                with st.spinner('กำลังให้ AI ช่วยวิเคราะห์ชื่อสินค้า...'):
+                with st.spinner('AI กำลังค้นหา...'):
                     try:
                         response = model.generate_content(prompt)
                         match_index = int(response.text.strip())
-                        found_by = "🤖 AI ค้นพบจากการวิเคราะห์ชื่อสินค้า"
+                        found_by = "🤖 AI ค้นพบจากการวิเคราะห์"
                     except:
                         match_index = -1
 
@@ -161,21 +154,36 @@ try:
                         price_data.append({"กำไร %": f"{m}%", "ราคาขาย": f"{sp:,.0f}", "กำไร (บาท)": f"{sp-cost_price:,.0f}"})
                     st.table(pd.DataFrame(price_data))
 
+                st.divider()
                 st.subheader("🔍 เช็คราคาคู่แข่ง")
-                encoded_name = urllib.parse.quote(model_id)
-                stores = [
-                    {"name": "HomePro", "url": f"https://www.homepro.co.th/search?q={encoded_name}"},
-                    {"name": "PowerBuy", "url": f"https://www.powerbuy.co.th/th/search/{encoded_name}"},
-                    {"name": "ThaiWatsadu", "url": f"https://www.thaiwatsadu.com/th/search/{encoded_name}"},
-                    {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={encoded_name}"},
-                    {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={encoded_name}"},
-                    {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={encoded_name}"},
-                    {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"}
-                ]
-                cols = st.columns(3)
-                for i, store in enumerate(stores):
-                    with cols[i % 3]:
-                        st.link_button(f"{store['name']}", store['url'], use_container_width=True)
+
+                # --- [ส่วนที่แก้ไขใหม่] ---
+                # 1. เตรียมคำค้นหาตั้งต้น (ลบภาษาไทยออกเหมือนเดิม)
+                default_search_code = re.sub(r'[\u0E00-\u0E7F]', '', str(model_id)).strip('-').strip()
+                
+                # 2. สร้างช่องให้ผู้ใช้แก้ไขได้ (Text Input)
+                # ถ้าผู้ใช้แก้คำในช่องนี้ ตัวแปร final_search_keyword จะเปลี่ยนตามทันที
+                final_search_keyword = st.text_input("🎯 คำค้นหาสำหรับเช็คราคา (แก้ไขได้):", value=default_search_code)
+                
+                if final_search_keyword:
+                    encoded_name = urllib.parse.quote(final_search_keyword.strip())
+                    
+                    stores = [
+                        {"name": "HomePro", "url": f"https://www.homepro.co.th/search?q={encoded_name}"},
+                        {"name": "PowerBuy", "url": f"https://www.powerbuy.co.th/th/search/{encoded_name}"},
+                        {"name": "ThaiWatsadu", "url": f"https://www.thaiwatsadu.com/th/search/{encoded_name}"},
+                        {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={encoded_name}"},
+                        {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={encoded_name}"},
+                        {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={encoded_name}"},
+                        {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"}
+                    ]
+                    
+                    cols = st.columns(3)
+                    for i, store in enumerate(stores):
+                        with cols[i % 3]:
+                            st.link_button(f"{store['name']}", store['url'], use_container_width=True)
+                else:
+                    st.info("กรุณาพิมพ์คำค้นหาเพื่อสร้างปุ่มเช็คราคา")
 
             else:
                 st.warning(f"❌ ไม่พบข้อมูลสำหรับ: '{query}'")
