@@ -27,7 +27,7 @@ st.markdown("""
 @st.cache_resource
 def init_services():
     # ดึงกุญแจจาก Secrets
-    service_account_info = json.loads(st.secrets["gcp_service_account"])
+    service_account_info = st.secrets["gcp_service_account"]
     gemini_key = st.secrets["gemini_api_key"]
     
     # เชื่อมต่อ Google Sheets & Drive
