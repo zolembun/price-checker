@@ -583,10 +583,7 @@ with tab2:
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
     # -------------------------------------------------------------
-    # ส่วนค้นหา AI (ฉบับ Final Fix: แก้ตรรกะช่วงตัวเลข AND/OR)
-    # -------------------------------------------------------------
-    # -------------------------------------------------------------
-    # ส่วนค้นหา AI (ฉบับแก้ "หาพี่ใหญ่": ดึงเลขสเปคที่ถูกต้องแม้มีเลขอื่นปน)
+    # ส่วนค้นหา AI (ฉบับ Universal 100%: ใช้สเกลตัวเลขคัดกรอง)
     # -------------------------------------------------------------
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
@@ -613,84 +610,128 @@ with tab2:
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
-                            range_mask = pd.Series([True] * len(df_search))
-                            has_range = False
-                            choice_mask = pd.Series([False] * len(df_search))
-                            has_choice = False
-
-                            vals_log = []
+                            numeric_conds = []
+                            choice_conds = []
                             
                             for f in conditions:
-                                op = f['operator']
-                                raw_val = f['value']
-                                values_list = raw_val if isinstance(raw_val, list) else [raw_val]
+                                if f['operator'] in ['gt', 'gte', 'lt', 'lte']:
+                                    numeric_conds.append(f)
+                                else:
+                                    choice_conds.append(f)
+                            
+                            # 1. จัดการเงื่อนไขตัวเลข
+                            range_mask = pd.Series([True] * len(df_search))
+                            if numeric_conds:
                                 
-                                for val in values_list:
-                                    is_numeric_check = False
-                                    s_val_num = None
-                                    val_num = None
+                                # หา "ค่าสเกล" ที่ลูกค้าค้นหา (เพื่อใช้กรองเลขขยะ)
+                                # เช่น ถ้าค้นหา 2000 (วัตต์) -> เราจะไม่สนใจเลข 34 (รุ่น)
+                                check_scale = 0
+                                try:
+                                    first_val = str(numeric_conds[0]['value']).replace(',','')
+                                    check_scale = float(first_val)
+                                except: check_scale = 0
 
-                                    if col == 'ราคาทุนต่อหน่วย' or (col == 'AI_Spec' and op in ['gt', 'gte', 'lt', 'lte']):
-                                        is_numeric_check = True
-                                        try:
-                                            val_clean_num = str(val).replace(',', '')
-                                            val_num = float(val_clean_num)
+                                def extract_numbers_universal(text):
+                                    # ถ้าเป็นราคา ให้ดูค่าเดียวจบ
+                                    if col == 'ราคาทุนต่อหน่วย':
+                                        try: return float(str(text).replace(',',''))
+                                        except: return 0.0
+                                    
+                                    # ถ้าเป็น Spec ให้แกะตัวเลขทั้งหมดออกมา
+                                    try:
+                                        clean_text = str(text).replace(',', '')
+                                        nums = re.findall(r'(\d+\.?\d*)', clean_text)
+                                        if not nums: return []
+                                        floats = [float(n) for n in nums if n and n != '.']
+                                        
+                                        # 🔥 Universal Logic: กรองเลขตามสเกลที่ลูกค้าหา 🔥
+                                        
+                                        if check_scale >= 500:
+                                            # กรณีค้นหา แอร์/เตารีด/น้ำอุ่น (เลขเยอะ)
+                                            # ให้ตัดเลขที่น้อยกว่า 100 ทิ้ง (เพราะน่าจะเป็นชื่อรุ่น เช่น WH-34)
+                                            return [n for n in floats if n > 100]
                                             
-                                            if col == 'ราคาทุนต่อหน่วย':
-                                                s_val_num = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
-                                            else:
-                                                # 🔥 [สูตรหาพี่ใหญ่] ดึงตัวเลขทุกตัวออกมา แล้วเลือกตัวที่มากที่สุด
-                                                # วิธีนี้จะแก้ปัญหา R32, รุ่น AR10 ที่มากวนใจได้
-                                                def get_max_number(text):
-                                                    try:
-                                                        clean_text = str(text).replace(',', '') # ลบลูกน้ำ
-                                                        # หาตัวเลขทั้งหมดในข้อความ (รวมทศนิยม)
-                                                        nums = re.findall(r'(\d+\.?\d*)', clean_text)
-                                                        if not nums: return 0.0
-                                                        # แปลงเป็นตัวเลขแล้วหาค่ามากที่สุด
-                                                        floats = [float(n) for n in nums if n and n != '.']
-                                                        return max(floats) if floats else 0.0
-                                                    except: return 0.0
+                                        elif check_scale > 0 and check_scale <= 50:
+                                            # กรณีค้นหา ตู้เย็น/หม้อหุงข้าว (เลขน้อย)
+                                            # ให้ตัดเลขที่มากกว่า 500 ทิ้ง (เพราะน่าจะเป็นรหัสรุ่น เช่น Model-800)
+                                            return [n for n in floats if n < 500]
+                                        
+                                        # กรณีกลางๆ (เช่น ทีวี 55-85 นิ้ว) หรืออื่นๆ -> เอามาหมด
+                                        return floats
+                                        
+                                    except: return []
 
-                                                # ใช้ apply เพื่อประมวลผลทีละแถว (ชัวร์กว่า)
-                                                s_val_num = df_search[col].apply(get_max_number)
-                                        except:
-                                            is_numeric_check = False 
-                                    
-                                    sub_mask = None
-                                    if is_numeric_check:
-                                        if op == 'gt': sub_mask = (s_val_num > val_num)
-                                        elif op == 'gte': sub_mask = (s_val_num >= val_num)
-                                        elif op == 'lt': sub_mask = (s_val_num < val_num)
-                                        elif op == 'lte': sub_mask = (s_val_num <= val_num)
-                                        elif op == 'equals': sub_mask = (s_val_num == val_num)
+                                if col == 'AI_Spec':
+                                    vals_extracted = df_search[col].apply(extract_numbers_universal)
+                                else:
+                                    vals_extracted = df_search[col].apply(lambda x: extract_numbers_universal(x))
+
+                                def validate_row(extracted_val):
+                                    if isinstance(extracted_val, list):
+                                        # มีเลขหลายตัว -> ขอแค่ตัวไหนก็ได้ผ่านเงื่อนไขครบ
+                                        for num in extracted_val:
+                                            pass_all = True
+                                            for cond in numeric_conds:
+                                                op = cond['operator']
+                                                limit = float(str(cond['value']).replace(',',''))
+                                                
+                                                if op == 'gt' and not (num > limit): pass_all = False; break
+                                                if op == 'gte' and not (num >= limit): pass_all = False; break
+                                                if op == 'lt' and not (num < limit): pass_all = False; break
+                                                if op == 'lte' and not (num <= limit): pass_all = False; break
+                                            
+                                            if pass_all: return True
+                                        return False
                                     else:
-                                        s_val = df_search[col].astype(str)
-                                        val = str(val)
-                                        if val.endswith(".0"): val = val[:-2]
+                                        # เลขตัวเดียว (ราคา)
+                                        num = extracted_val
+                                        for cond in numeric_conds:
+                                            op = cond['operator']
+                                            limit = float(str(cond['value']).replace(',',''))
+                                            if op == 'gt' and not (num > limit): return False
+                                            if op == 'gte' and not (num >= limit): return False
+                                            if op == 'lt' and not (num < limit): return False
+                                            if op == 'lte' and not (num <= limit): return False
+                                        return True
 
-                                        if op == 'contains' or op == 'in': 
-                                            s_val_clean = s_val.str.replace(" ", "").str.replace(",", "")
-                                            val_clean = val.replace(" ", "").replace(",", "")
-                                            sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
-                                        elif op == 'equals': sub_mask = (s_val == val)
+                                range_mask = vals_extracted.apply(validate_row)
 
-                                    if sub_mask is not None:
-                                        if op in ['gt', 'gte', 'lt', 'lte']:
-                                            range_mask &= sub_mask
-                                            has_range = True
-                                        else:
-                                            choice_mask |= sub_mask
-                                            has_choice = True
+                            # 2. จัดการเงื่อนไขข้อความ
+                            choice_mask = pd.Series([False] * len(df_search))
+                            if not choice_conds:
+                                choice_mask = pd.Series([True] * len(df_search))
+                            
+                            vals_log = []
+                            for f in choice_conds:
+                                op = f['operator']
+                                val = f['value']
+                                val_list = val if isinstance(val, list) else [val]
+                                
+                                for v in val_list:
+                                    s_val = df_search[col].astype(str)
+                                    v_str = str(v)
+                                    if v_str.endswith(".0"): v_str = v_str[:-2]
                                     
-                                    vals_log.append(f"{val}")
+                                    sub_mask = pd.Series([False] * len(df_search))
+                                    if op == 'contains' or op == 'in':
+                                        s_clean = s_val.str.replace(" ", "").str.replace(",", "")
+                                        v_clean = v_str.replace(" ", "").replace(",", "")
+                                        sub_mask = s_clean.str.contains(v_clean, case=False, na=False)
+                                    elif op == 'equals':
+                                        sub_mask = (s_val == v_str)
+                                    
+                                    choice_mask |= sub_mask
+                                    vals_log.append(f"{v}")
+
+                            final_mask &= (range_mask & choice_mask)
                             
-                            final_col_mask = pd.Series([True] * len(df_search))
-                            if has_range: final_col_mask &= range_mask
-                            if has_choice: final_col_mask &= choice_mask
-                            
-                            final_mask &= final_col_mask
-                            active_conds.append(f"{col}: {'|'.join(vals_log)}")
+                            log_text = ""
+                            if numeric_conds:
+                                nums_log = [f"{c['operator']} {c['value']}" for c in numeric_conds]
+                                log_text += f"Range({', '.join(nums_log)}) "
+                            if vals_log:
+                                log_text += f"Text({'|'.join(vals_log)})"
+                            active_conds.append(f"{col}: {log_text}")
                         
                         results = df_search[final_mask]
                         
@@ -711,24 +752,6 @@ with tab2:
                         else: 
                             st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {'; '.join(active_conds)})")
                             
-                            # 🔥 [Debug พิเศษ] ช่วยเช็คว่าระบบอ่านค่าตัวเลขได้เท่าไหร่
-                            if 'AI_Spec' in df_search.columns:
-                                st.write("---")
-                                st.info("🔍 ตรวจสอบค่าสเปคที่ระบบอ่านได้ (Sample):")
-                                
-                                # ฟังก์ชันจำลองเพื่อโชว์ให้ user ดู
-                                def preview_extract(text):
-                                    try:
-                                        clean_text = str(text).replace(',', '')
-                                        nums = re.findall(r'(\d+\.?\d*)', clean_text)
-                                        floats = [float(n) for n in nums if n and n != '.']
-                                        return max(floats) if floats else 0.0
-                                    except: return 0.0
-
-                                sample_df = df_search[['รายละเอียดสินค้า', 'AI_Spec']].head(5).copy()
-                                sample_df['ค่าที่อ่านได้ (Max Number)'] = sample_df['AI_Spec'].apply(preview_extract)
-                                st.dataframe(sample_df)
-
                     except Exception as e: st.error(f"Error: {e}")
                 else:
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
