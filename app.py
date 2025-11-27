@@ -204,36 +204,61 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (Force JSON + Debug)
 # ---------------------------------------------------------
-# วางทับฟังก์ชัน def ask_gemini_extract(names): เดิม
+# ---------------------------------------------------------
+# 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
     prompt = f"""
-    Analyze product names. Return ONLY JSON Array.
-    Input: {json.dumps(names, ensure_ascii=False)}
-    Example: [{{"AI_Brand": "Samsung", "AI_Type": "TV", "AI_Spec": "55 Inch", "AI_Tags": "4K"}}]
-    If unknown, use "Unknown" or "-".
+    Role: Product Data Expert.
+    Task: Extract attributes from product names.
+    Input List: {json.dumps(names, ensure_ascii=False)}
+    
+    Strict Rules:
+    1. **Fix Messy Text**: Separate glued words (e.g., "Refrigerator5.2" -> "Refrigerator" + "5.2").
+    2. **Standardize Type**: 'AI_Type' MUST be in Thai (e.g., "Refrigerator" -> "ตู้เย็น", "TV" -> "ทีวี").
+    3. **Extract Spec**: Find numbers related to size/capacity (Q, คิว, L, นิ้ว, BTU).
+    
+    Output JSON Array ONLY:
+    [
+      {{
+        "AI_Brand": "Brand Name (e.g. Toshiba)",
+        "AI_Type": "Category in Thai (e.g. ตู้เย็น)",
+        "AI_Spec": "Main Spec (e.g. 5.2 คิว)",
+        "AI_Tags": "Keywords"
+      }}
+    ]
     """
+    
     try:
         response = ai_model.generate_content(
             prompt,
-            generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
         )
+        
+        # Clean & Parse
         data = json.loads(response.text.strip())
         
         normalized_data = []
         for item in data:
             new_item = {
-                "AI_Brand": item.get("AI_Brand") or item.get("Brand") or "Unknown",
-                "AI_Type": item.get("AI_Type") or item.get("Type") or "Other",
-                "AI_Spec": item.get("AI_Spec") or item.get("Spec") or "-",
-                "AI_Tags": item.get("AI_Tags") or item.get("Tags") or ""
+                "AI_Brand": item.get("AI_Brand") or "Unknown",
+                "AI_Type": item.get("AI_Type") or "Other",
+                "AI_Spec": item.get("AI_Spec") or "-",
+                "AI_Tags": item.get("AI_Tags") or ""
             }
+            # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
+                
             normalized_data.append(new_item)
             
         return normalized_data
-    except: return []
 
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return []
 def ask_gemini_filter(query, columns):
     prompt = f"""
     Role: คุณคือ Search Engine อัจฉริยะ แปลงคำค้นหา "{query}" เป็น JSON Filter
