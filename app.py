@@ -362,7 +362,7 @@ def ask_gemini_filter(query, columns):
         res = ai_model.generate_content(prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json"))
         return json.loads(res.text.strip())
     except: return None
-    def clean_text(text):
+def clean_text(text):
     # 👇 ต้องมีการเว้นวรรค (Indentation) ตรงนี้
     if not text: return ""
     return re.sub(r'[^a-zA-Z0-9]', '', str(text)).lower()
