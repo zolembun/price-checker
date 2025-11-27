@@ -616,7 +616,7 @@ if col_q2.button("ค้นหา AI", type="primary"):
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
                             st.dataframe(
-                                results[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ราคาทุนต่อหน่วย', 'จำนวนสต้อก', 'AI_Brand', 'AI_Spec']],
+                                results[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ราคาทุนต่อหน่วย', 'จำนวนสต้อก', 'AI_Brand', 'AI_Spec', 'AI_Kind']],
                                 column_config={
                                     "ราคาทุนต่อหน่วย": st.column_config.NumberColumn("ราคาทุน", format="฿%d"), 
                                     "จำนวนสต้อก": st.column_config.ProgressColumn("สต้อก", format="%d", max_value=int(df_search['จำนวนสต้อก'].max()))
