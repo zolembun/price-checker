@@ -173,6 +173,29 @@ def append_to_sheet(data_values):
         st.error(f"Save Error: {e}")
         return False
 
+def overwrite_memory_sheet(df_new_mem):
+    try:
+        # 1. แปลง DataFrame เป็น List เพื่อเตรียมบันทึก
+        # ต้องจัดการ NaN ให้เป็น empty string ไม่งั้น Error
+        df_new_mem = df_new_mem.fillna('') 
+        values = [df_new_mem.columns.tolist()] + df_new_mem.values.tolist()
+        
+        # 2. ล้างข้อมูลเก่าทั้งหมดใน AI_Memory
+        sheets_svc.spreadsheets().values().clear(
+            spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:E"
+        ).execute()
+
+        # 3. บันทึกข้อมูลใหม่ลงไป
+        body = {'values': values}
+        sheets_svc.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A1",
+            valueInputOption="USER_ENTERED", body=body
+        ).execute()
+        return True
+    except Exception as e:
+        st.error(f"Cleanup Error: {e}")
+        return False
+
 @st.cache_data(ttl=600)
 def merge_data(df_main, df_mem):
     # ถ้าไม่มีข้อมูล AI ให้คืนค่าเดิมไปก่อน
@@ -191,9 +214,10 @@ def merge_data(df_main, df_mem):
     merged = pd.merge(df_main_c, df_mem_c, on='join_key', how='left')
     
     # 3. ถมช่องว่าง (สำคัญมาก: ถ้า AI ยังไม่รู้จัก ให้ใส่ค่าว่าง อย่าให้เป็น NaN)
-    cols_to_fix = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags']
+    cols_to_fix = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'AI_Kind'] 
     for col in cols_to_fix:
         if col in merged.columns:
+            # fillna('') จะทำให้ค่าว่างเป็น string ว่างๆ ไม่ error เวลาค้นหา
             merged[col] = merged[col].fillna('').astype(str)
     
     # ลบคอลัมน์ช่วย (join_key) ทิ้ง
@@ -216,14 +240,19 @@ def ask_gemini_extract(names):
     Strict Rules:
     1. **Fix Messy Text**: Separate glued words (e.g., "Refrigerator5.2" -> "Refrigerator" + "5.2").
     2. **Standardize Type**: 'AI_Type' MUST be in Thai (e.g., "Refrigerator" -> "ตู้เย็น", "TV" -> "ทีวี").
-    3. **Extract Spec**: Find numbers related to size/capacity (Q, คิว, L, นิ้ว, BTU).
-    
+    3. **Extract Kind (NEW)**: 'AI_Kind' is Sub-Category/Feature.
+       - Fridge: 1 ประตู, 2 ประตู, Side by Side
+       - Washer: ฝาบน, ฝาหน้า, 2 ถัง
+       - Air: Inverter, Fixed Speed, แขวน, ติดผนัง
+    4. **Extract Spec**: Numbers for size/capacity (Q, kg, BTU).
     Output JSON Array ONLY:
+   Output JSON Array ONLY:
     [
       {{
-        "AI_Brand": "Brand Name (e.g. Toshiba)",
-        "AI_Type": "Category in Thai (e.g. ตู้เย็น)",
-        "AI_Spec": "Main Spec (e.g. 5.2 คิว)",
+        "AI_Brand": "Brand",
+        "AI_Type": "Main Category (Thai)",
+        "AI_Kind": "Sub Type (Thai) or empty string", 
+        "AI_Spec": "Spec",
         "AI_Tags": "Keywords"
       }}
     ]
@@ -242,12 +271,13 @@ def ask_gemini_extract(names):
         
         normalized_data = []
         for item in data:
-            new_item = {
-                "AI_Brand": item.get("AI_Brand") or "Unknown",
-                "AI_Type": item.get("AI_Type") or "Other",
-                "AI_Spec": item.get("AI_Spec") or "-",
-                "AI_Tags": item.get("AI_Tags") or ""
-            }
+        new_item = {
+            "AI_Brand": item.get("AI_Brand") or "Unknown",
+            "AI_Type": item.get("AI_Type") or "Other",
+            "AI_Kind": item.get("AI_Kind") or "",  # <--- เพิ่มบรรทัดนี้
+            "AI_Spec": item.get("AI_Spec") or "-",
+            "AI_Tags": item.get("AI_Tags") or ""
+        }
             # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
@@ -450,6 +480,41 @@ with tab2:
                         st.rerun()
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
+
+            # ========================================================
+        # 🔥 ส่วนที่เพิ่มใหม่: ปุ่มล้างขยะ (วางต่อท้าย แต่อยู่ใน expander)
+        # ========================================================
+        st.divider()
+        st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
+        
+        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary"):
+            with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
+                # 1. หาสินค้าที่มีอยู่จริงใน Main
+                valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
+                
+                # 2. กรอง df_mem ให้เหลือเฉพาะที่มีใน valid_skus
+                # สร้าง column ชั่วคราวเพื่อเทียบ
+                df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
+                
+                # คัดเอาเฉพาะที่ key ตรงกัน
+                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
+                
+                # ลบ column ช่วยเหลือทิ้ง
+                del df_mem_clean['check_key']
+                
+                deleted_count = len(df_mem) - len(df_mem_clean)
+                
+                if deleted_count > 0:
+                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
+                    # เรียกใช้ฟังก์ชัน overwrite ที่เราสร้างไว้ข้างบน
+                    success = overwrite_memory_sheet(df_mem_clean) 
+                    if success:
+                        status.update(label=f"✅ ลบเสร็จสิ้น! (เหลือ {len(df_mem_clean)} รายการ)", state="complete")
+                        st.cache_data.clear()
+                        time.sleep(2)
+                        st.rerun()
+                else:
+                    status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว ไม่ต้องลบ", state="complete")
 
     st.divider()
     
