@@ -131,18 +131,27 @@ def load_data_master():
                     df_main[col] = pd.to_numeric(df_main[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         else:
             df_main = pd.DataFrame()
-
-        # AI Memory Data
+# AI Memory Data
         try:
             res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:E").execute()
             vals_mem = res_mem.get('values', [])
-            if vals_mem:
-                df_mem = pd.DataFrame(vals_mem[1:], columns=vals_mem[0])
+            
+            if vals_mem and len(vals_mem) > 1:
+                headers = vals_mem[0]
+                rows = vals_mem[1:]
+                # ✨ แก้ไข: ถมช่องว่างให้เต็ม (Fix Jagged Rows)
+                # ถ้าข้อมูลแถวไหนสั้นกว่าหัวข้อ ให้เติม None ใส่เข้าไปจนครบ
+                fixed_rows = [r + [None]*(len(headers)-len(r)) for r in rows]
+                
+                df_mem = pd.DataFrame(fixed_rows, columns=headers)
             else:
+                # กรณีมีแต่หัวข้อ หรือไม่มีข้อมูลเลย
                 df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
-        except:
+                
+        except Exception as e:
+            # แนะนำให้ print error ออกมาดูด้วยถ้าทำได้
+            # st.error(f"Debug Mem Error: {e}") 
             df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
-
         return df_main, df_mem, file_name, last_update
 
     except Exception as e:
