@@ -142,7 +142,7 @@ def load_data_master():
 
         # AI Memory Data
         try:
-            res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:E").execute()
+           res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:F").execute()
             vals_mem = res_mem.get('values', [])
             
             if vals_mem and len(vals_mem) > 1:
