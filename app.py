@@ -253,24 +253,37 @@ def merge_data(df_main, df_mem):
 # 🔥 ฟังก์ชัน AI (เวอร์ชั่น Ultra-Safe: ไม่พังแน่นอน)
 # ---------------------------------------------------------
 def ask_gemini_extract(names):
-    # Prompt กระชับขึ้น เพื่อให้ AI ตอบตรงประเด็น
+    # เตรียมข้อมูล Default ไว้ก่อน (ถ้า AI พังจะได้มีค่าคืน ไม่ Error)
+    default_list = []
+    for _ in names:
+        default_list.append({
+            "AI_Brand": "Unknown", 
+            "AI_Type": "Other", 
+            "AI_Kind": "", 
+            "AI_Spec": "-", 
+            "AI_Tags": ""
+        })
+
+    # ถ้าไม่มีข้อมูลส่งมา ก็คืนค่าว่างไปเลย
+    if not names: return []
+
+    # Prompt แบบกระชับ สั่งตรงๆ เหมือนสั่งคนทำงาน
     prompt = f"""
-    Role: Product Data Expert.
-    Task: Extract attributes from product list.
-    Input: {json.dumps(names, ensure_ascii=False)}
-    
-    Output Rules:
-    - Return ONLY a JSON Array.
-    - Fields: "AI_Brand", "AI_Type" (Thai), "AI_Kind" (Thai Sub-type/Feature), "AI_Spec", "AI_Tags".
-    - If info is missing, use empty string "".
+    Help me extract product details from this list:
+    {json.dumps(names, ensure_ascii=False)}
+
+    Please return a JSON Array of objects with these fields:
+    - "AI_Brand": Brand name (e.g. Samsung).
+    - "AI_Type": Category in Thai (e.g. ตู้เย็น, แอร์).
+    - "AI_Kind": Sub-type/Feature in Thai (Important!). 
+      (Examples: 1 ประตู, 2 ประตู, Inverter, ฝาบน, ฝาหน้า). 
+      If not found, use empty string "".
+    - "AI_Spec": Capacity/Size (e.g. 5.2 คิว, 9000 BTU).
+    - "AI_Tags": Keywords.
+
+    Strictly return ONLY JSON. No Markdown.
     """
     
-    # เตรียมค่า Default ไว้กันเหนียว (ถ้า AI พัง เราจะส่งอันนี้คืน)
-    default_result = [
-        {"AI_Brand": "Unknown", "AI_Type": "Other", "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""} 
-        for _ in names
-    ]
-
     try:
         response = ai_model.generate_content(
             prompt,
@@ -281,30 +294,13 @@ def ask_gemini_extract(names):
         
         txt = response.text.strip()
         
-        # 🛡️ ป้องกัน 1: ถ้า AI ส่งค่าว่างมา
-        if not txt:
-            print("AI Warning: Empty response")
-            return default_result
-
-        # 🛡️ ป้องกัน 2: พยายามหา JSON Array [...] ในข้อความ
-        # บางที AI ชอบพิมพ์เกริ่นนำ เราจะตัดทิ้งเอาแค่ส่วนที่เป็น []
-        match = re.search(r'\[.*\]', txt, re.DOTALL)
-        if match:
-            txt = match.group(0)
+        # ล้าง Markdown ออก (กันเหนียว)
+        if "```" in txt:
+            txt = re.sub(r"^```json|^```", "", txt, flags=re.MULTILINE).strip()
+            txt = re.sub(r"```$", "", txt, flags=re.MULTILINE).strip()
+            
+        data = json.loads(txt)
         
-        # 🛡️ ป้องกัน 3: ลองแปลง JSON
-        try:
-            data = json.loads(txt)
-        except json.JSONDecodeError:
-            # ถ้ายัง Error อีก ลองลบ Markdown ```json ออกแล้วลองใหม่
-            txt_clean = re.sub(r"```json|```", "", txt).strip()
-            try:
-                data = json.loads(txt_clean)
-            except:
-                print(f"AI JSON Error. Raw text: {txt}")
-                return default_result # ยอมแพ้ คืนค่า Default
-
-        # ถ้าแปลงสำเร็จ ก็จัดรูปแบบข้อมูล
         normalized_data = []
         for item in data:
             new_item = {
@@ -314,20 +310,18 @@ def ask_gemini_extract(names):
                 "AI_Spec": item.get("AI_Spec") or "-",
                 "AI_Tags": item.get("AI_Tags") or ""
             }
+            # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
                 
             normalized_data.append(new_item)
-        
-        # เช็คจำนวนว่าครบไหม ถ้า AI ส่งมาไม่ครบ ให้เติมให้ครบ
-        if len(normalized_data) < len(names):
-            normalized_data.extend(default_result[len(normalized_data):])
             
         return normalized_data
 
     except Exception as e:
-        print(f"AI Critical Error: {e}")
-        return default_result
+        print(f"AI Error: {e}")
+        # 🔥 จุดสำคัญ: ถ้า Error ให้คืนค่า Default กลับไป โปรแกรมจะไม่แดง!
+        return default_list
 def ask_gemini_filter(query, columns):
     # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
     prompt = f"""
