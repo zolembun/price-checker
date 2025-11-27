@@ -539,6 +539,10 @@ with tab2:
     
     # --- ส่วนค้นหา AI ---
     df_search = merge_data(df_main, df_mem)
+    # 👇👇👇 แทรก 3 บรรทัดนี้ เพื่อแก้ Error "AI_Kind not in index" 👇👇👇
+    if 'AI_Kind' not in df_search.columns:
+        df_search['AI_Kind'] = ''
+    # 👆👆👆 (ถ้าไม่มีคอลัมน์นี้ ให้สร้างขึ้นมาเป็นค่าว่างๆ รอไว้ก่อนเลย)
     
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
