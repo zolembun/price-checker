@@ -222,32 +222,28 @@ def ask_gemini_extract(names):
 
 def ask_gemini_filter(query, columns):
     prompt = f"""
-    Role: คุณคือ Search Engine อัจฉริยะ หน้าที่คือแปลงคำค้นหา "{query}" เป็น JSON Filter
-    Columns Available: {columns}
+    Role: Search Engine. Convert "{query}" to JSON. Cols: {columns}
     
-    Instruction (สำคัญมาก):
-    1. **Primary Filter**: ต้องระบุ 'AI_Type' หรือ 'AI_Brand' เสมอถ้ามีในคำค้น (เช่น "ตู้เย็น" -> AI_Type contains "ตู้เย็น")
-    2. **Range Handling**: ถ้าเจอช่วงตัวเลข (เช่น "6-10 คิว") ให้แตกเป็นเลขจำนวนเต็มทุกตัวในช่วงนั้น (เช่น 6, 7, 8, 9, 10)
-    3. **Unit Removal**: ตัดหน่วยทิ้งเสมอ (เอาแค่ตัวเลข)
-    4. **Price Logic (กฎเหล็ก)**: 
-       - ถ้าผู้ใช้แค่ถามว่า "ราคาเท่าไหร่", "ขอราคาทุน", "เช็คราคา" -> **ห้าม** สร้าง Filter 'ราคาทุนต่อหน่วย' เด็ดขาด! (ปล่อยให้เป็นหน้าที่ของการแสดงผล)
-       - ให้สร้าง Filter 'ราคาทุนต่อหน่วย' **เฉพาะเมื่อ** มีตัวเลขกำกับเท่านั้น (เช่น "ไม่เกิน 5000", "ถูกกว่า 2000")
+    Rules:
+    1. **Primary**: Filter 'AI_Type'/'AI_Brand' if mentioned.
+    2. **Range**: "5-8" -> value: ["5", "6", "7", "8"] (Integers only).
+    3. **Price Filter**: 
+       - If user asks "price?" or "lowest/highest price" WITHOUT specific number -> DO NOT create filter for 'ราคาทุนต่อหน่วย'.
+       - Create filter ONLY if number exists (e.g. "< 5000").
+    4. **Sorting (สำคัญ)**:
+       - "ถูกสุด", "ต่ำสุด", "น้อยสุด" -> sort_order: "asc"
+       - "แพงสุด", "สูงสุด", "มากสุด" -> sort_order: "desc"
+       - Default -> sort_order: null
     
-    Output Format (JSON):
+    Output JSON:
     {{
-        "filters": [
-            {{ "column": "AI_Type", "operator": "contains", "value": "ตู้เย็น" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "7" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "8" }}
-        ]
+        "filters": [ {{ "column": "...", "operator": "...", "value": "..." }} ],
+        "sort_order": "asc" 
     }}
     """
     try:
         res = ai_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
+            prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
         )
         return json.loads(res.text.strip())
     except: return None
@@ -411,23 +407,28 @@ with tab2:
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
    # วางต่อจากบรรทัด: query2 = col_q1.text_input(...)
-    if col_q2.button("ค้นหา AI", type="primary"):
+   if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย']
-                filters = ask_gemini_filter(query2, cols_ai)
+                result_json = ask_gemini_filter(query2, cols_ai)
                 
-                if filters and 'filters' in filters:
-                    mask = pd.Series([True] * len(df_search))
+                if result_json and 'filters' in result_json:
+                    filters = result_json['filters']
+                    sort_order = result_json.get('sort_order') # รับค่าการเรียงลำดับ
+                    
+                    # 1. เริ่มต้น: สมมติว่าเอาทุกแถวไว้ก่อน
+                    final_mask = pd.Series([True] * len(df_search))
                     active_conds = []
+                    
+                    # 2. จัดกลุ่ม Filter ตามคอลัมน์
+                    from collections import defaultdict
+                    grouped_filters = defaultdict(list)
+                    for f in filters:
+                        grouped_filters[f['column']].append(f)
+                    
                     try:
-                        # 1. จัดกลุ่ม Filter ตามคอลัมน์
-                        from collections import defaultdict
-                        grouped_filters = defaultdict(list)
-                        for f in filters['filters']:
-                            grouped_filters[f['column']].append(f)
-
-                        # 2. วนลูปทีละคอลัมน์
+                        # 3. วนลูปทีละคอลัมน์
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
@@ -443,16 +444,30 @@ with tab2:
                                 if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
                                 elif op == 'equals': sub_mask = (s_val == val)
                                 elif op == 'gt': sub_mask = (s_val > val)
+                                elif op == 'gte': sub_mask = (s_val >= val)
                                 elif op == 'lt': sub_mask = (s_val < val)
+                                elif op == 'lte': sub_mask = (s_val <= val)
                                 else: sub_mask = pd.Series([False] * len(df_search))
                                 
-                                col_mask |= sub_mask # ใช้ OR ภายในคอลัมน์เดียวกัน
+                                col_mask |= sub_mask
                                 vals_log.append(f"{val}")
                             
-                            mask &= col_mask # ใช้ AND ระหว่างคอลัมน์
+                            final_mask &= col_mask
                             active_conds.append(f"{col}: {' | '.join(vals_log)}")
                         
-                        results = df_search[mask]
+                        # 4. ได้ผลลัพธ์แล้ว (แต่ยังไม่เรียง)
+                        results = df_search[final_mask]
+                        
+                        # 5. --- [เพิ่มใหม่] Logic การเรียงลำดับ ---
+                        if not results.empty and sort_order:
+                            if sort_order == 'asc':
+                                results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
+                                st.toast("⬇️ เรียงจาก ถูก -> แพง")
+                            elif sort_order == 'desc':
+                                results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=False)
+                                st.toast("⬆️ เรียงจาก แพง -> ถูก")
+                        # ----------------------------------------
+
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
                             st.dataframe(
@@ -463,8 +478,10 @@ with tab2:
                                 },
                                 use_container_width=True, hide_index=True
                             )
-                        else: st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
-                    except Exception as e: st.error(f"เกิดข้อผิดพลาด: {e}")
+                        else: 
+                            st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
+                            
+                    except Exception as e: st.error(f"Error: {e}")
                 else:
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
