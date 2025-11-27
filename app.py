@@ -235,10 +235,27 @@ def ask_gemini_extract(names):
         st.sidebar.error(f"AI Error: {e}")
         return []
 
-def ask_gemini_filter(query, cols):
-    prompt = f"แปลงคำถาม '{query}' เป็น JSON Filter Pandas. Cols: {cols}. Format: {{'filters': [{{'column':..., 'operator':..., 'value':...}}]}}"
+def ask_gemini_filter(query, columns):
+    prompt = f"""
+    Role: คุณคือผู้เชี่ยวชาญ Data Query หน้าที่คือแปลงคำถามธรรมชาติเป็น Filter JSON
+    User Query: "{query}"
+    Available Columns: {columns}
+    
+    Instruction:
+    1. สร้างเงื่อนไขการกรอง (Filter Conditions) ที่ "กว้างและยืดหยุ่น" ที่สุด
+    2. **สำคัญมาก**: สำหรับคอลัมน์ 'AI_Spec' หรือ 'AI_Tags' ห้ามใส่หน่วยยาวๆ 
+       - ผิด: value: "4 ลิตร" (เพราะถ้าในฐานข้อมูลเป็น 4L จะหาไม่เจอ)
+       - ถูก: value: "4" (จะเจอทั้ง 4L, 4 ลิตร, 4.0)
+    3. สำหรับราคา ให้ใช้ operator 'gt' (มากกว่า) หรือ 'lt' (น้อยกว่า) เท่านั้น อย่าใช้ equals
+    
+    Output Format (JSON Only):
+    {{
+        "filters": [
+            {{ "column": "col_name", "operator": "contains/equals/gt/lt", "value": "val" }}
+        ]
+    }}
+    """
     try:
-        # ใช้ config json เหมือนกันเพื่อความชัวร์
         res = ai_model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -247,7 +264,6 @@ def ask_gemini_filter(query, cols):
         )
         return json.loads(res.text.strip())
     except: return None
-
 # ---------------------------------------------------------
 # 6. MAIN APP UI (TABS)
 # ---------------------------------------------------------
