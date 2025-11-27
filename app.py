@@ -459,52 +459,50 @@ with tab2:
       if new_count > 0:
             if c_a2.button("🚀 สอน AI เดี๋ยวนี้", type="primary"):
                 with st.status("🤖 AI กำลังเรียนรู้...", expanded=True) as status:
+                
+                # 1. เช็คว่ามีคอลัมน์ 'ชนิด' ไหม (ถ้าไม่มีสร้างใหม่)
+                if 'ชนิด' not in new_items_df.columns:
+                    new_items_df['ชนิด'] = ''
                     
-                    # 🔥 จุดที่แก้ 1: ดึงคอลัมน์ 'ชนิด' มาด้วย (ถ้าไม่มีให้สร้างเป็นค่าว่าง)
-                    if 'ชนิด' not in new_items_df.columns:
-                        new_items_df['ชนิด'] = ''
-                        
-                    # เปลี่ยนชื่อคอลัมน์เพื่อความง่ายในการเรียกใช้
-                    to_proc = new_items_df[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ชนิด']].rename(
-                        columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
-                    ).to_dict('records')
+                # 2. เปลี่ยนชื่อคอลัมน์เตรียมส่ง (เอา 'ชนิด' มาด้วย)
+                to_proc = new_items_df[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ชนิด']].rename(
+                    columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
+                ).to_dict('records')
 
-                    BATCH = 10
-                    res_save = []
-                    total_batches = (len(to_proc) // BATCH) + 1
+                BATCH = 10
+                res_save = []
+                total_batches = (len(to_proc) // BATCH) + 1
+                
+                for i in range(0, len(to_proc), BATCH):
+                    chunk = to_proc[i:i+BATCH]
+                    status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
                     
-                    for i in range(0, len(to_proc), BATCH):
-                        chunk = to_proc[i:i+BATCH]
-                        status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
-                        
-                        # 🔥 จุดที่แก้ 2: รวม "ชื่อสินค้า" + "ชนิดเดิม" ส่งให้ AI
-                        # เช่น: "ตู้เย็น Samsung (ชนิดเดิม: 2 ประตู)" -> AI จะรู้ทันทีว่าต้องใส่ 2 ประตู
-                        names = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
-                        
-                        # เรียก AI (ใช้ฟังก์ชันเดิมได้เลย เพราะเรามัดรวมข้อมูลไปใน names แล้ว)
-                        ai_res = ask_gemini_extract(names)
-                        
-                        for idx, item in enumerate(chunk):
-                            ar = ai_res[idx] if idx < len(ai_res) else {}
-                            res_save.append([
-                                item['SKU'], 
-                                ar.get('AI_Brand','Unknown'), 
-                                ar.get('AI_Type','Other'), 
-                                ar.get('AI_Spec','-'), 
-                                ar.get('AI_Tags',''),
-                                ar.get('AI_Kind','') # ใส่ AI_Kind ลงไป
-                            ])
-                        
-                        time.sleep(4) # พักหายใจนิดนึง
+                    # 🔥 แก้ไขตรงนี้: ส่ง "ชื่อ" + "ชนิดเดิม" ไปให้ AI
+                    names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
                     
-                    if res_save:
-                        # บันทึกลง Sheet (ต้องมั่นใจว่าใน Sheet มีหัวข้อ AI_Kind ที่คอลัมน์ F แล้วนะ)
-                        append_to_sheet(res_save)
-                        status.update(label="เสร็จสิ้น!", state="complete")
-                        st.balloons()
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
+                    # เรียก AI
+                    ai_res = ask_gemini_extract(names_for_ai)
+                    
+                    for idx, item in enumerate(chunk):
+                        ar = ai_res[idx] if idx < len(ai_res) else {}
+                        res_save.append([
+                            item['SKU'], 
+                            ar.get('AI_Brand','Unknown'), 
+                            ar.get('AI_Type','Other'), 
+                            ar.get('AI_Spec','-'), 
+                            ar.get('AI_Tags',''),
+                            ar.get('AI_Kind','') # ใส่ช่อง Kind
+                        ])
+                    
+                    time.sleep(4)
+                
+                if res_save:
+                    append_to_sheet(res_save)
+                    status.update(label="เสร็จสิ้น!", state="complete")
+                    st.balloons()
+                    st.cache_data.clear()
+                    time.sleep(1)
+                    st.rerun()
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
 
@@ -564,8 +562,8 @@ with tab2:
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
    # วางต่อจากบรรทัด: query2 = col_q1.text_input(...)
 if col_q2.button("ค้นหา AI", type="primary"):
-        if query2:
-            with st.spinner('🤖 AI กำลังคิด...'):
+        with st.spinner('🤖 AI กำลังคิด...'):
+                # 1. เพิ่ม AI_Kind เข้าไปในลิสต์คอลัมน์
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
                 result_json = ask_gemini_filter(query2, cols_ai)
                 
@@ -591,29 +589,22 @@ if col_q2.button("ค้นหา AI", type="primary"):
                             for f in conditions:
                                 op = f['operator']
                                 raw_val = f['value']
-                                
-                                # แตก List ออกมา (เผื่อ AI ส่งมาหลายค่า)
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
                                     if col == 'ราคาทุนต่อหน่วย':
-                                        # จัดการราคา (ตัวเลข)
                                         s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                         val = float(val)
                                     else:
-                                        # จัดการข้อความ/สเปค
                                         s_val = df_search[col].astype(str)
-                                        
-                                        # 🔥 [แก้จุดตาย] ถ้าเป็นเลขจำนวนเต็ม (เช่น 5.0) ให้ตัด .0 ทิ้ง เหลือแค่ "5"
-                                        # เพื่อให้ contains("5") ไปเจอ "5.2", "5.9" ได้
+                                        # ตัดทศนิยม .0
                                         try:
-                                            if isinstance(val, (int, float)):
-                                                if val == int(val): val = int(val)
-                                            val = str(val)
-                                        except:
-                                            val = str(val)
+                                            if isinstance(val, (int, float)) and val == int(val):
+                                                val = str(int(val))
+                                            else:
+                                                val = str(val)
+                                        except: val = str(val)
 
-                                    # เริ่มเปรียบเทียบ
                                     if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
                                     elif op == 'equals': sub_mask = (s_val == val)
                                     elif op == 'gt': sub_mask = (s_val > val)
@@ -622,23 +613,22 @@ if col_q2.button("ค้นหา AI", type="primary"):
                                     elif op == 'lte': sub_mask = (s_val <= val)
                                     else: sub_mask = pd.Series([False] * len(df_search))
                                     
-                                    col_mask |= sub_mask # Logic OR ภายในคอลัมน์
+                                    col_mask |= sub_mask
                                     vals_log.append(f"{val}")
                             
-                            final_mask &= col_mask # Logic AND ข้ามคอลัมน์
+                            final_mask &= col_mask
                             active_conds.append(f"{col}: {'|'.join(vals_log)}")
                         
                         results = df_search[final_mask]
                         
-                        # Logic เรียงลำดับ (Sorting)
                         if not results.empty and sort_order:
-                            if sort_order == 'asc':
-                                results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
-                            elif sort_order == 'desc':
-                                results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=False)
+                            if sort_order == 'asc': results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
+                            elif sort_order == 'desc': results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=False)
 
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
+                            
+                            # 2. เพิ่ม AI_Kind เข้าไปในตารางแสดงผล
                             st.dataframe(
                                 results[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ราคาทุนต่อหน่วย', 'จำนวนสต้อก', 'AI_Brand', 'AI_Spec', 'AI_Kind']],
                                 column_config={
@@ -652,6 +642,5 @@ if col_q2.button("ค้นหา AI", type="primary"):
                             
                     except Exception as e: st.error(f"Error: {e}")
                 else:
-                    # Fallback Search
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
