@@ -246,34 +246,32 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ - อัปเกรด Prompt)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 🔥 ฟังก์ชัน AI (เวอร์ชั่นกันกระสุน - แก้ Error JSON)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
     prompt = f"""
-    Role: Product Data Expert in Thailand.
-    Task: Extract structured data from product text.
+    Role: Product Data Expert.
+    Task: Extract attributes from product text.
     Input List: {json.dumps(names, ensure_ascii=False)}
     
-    Instruction: The input text contains 'Product Name' and sometimes 'Old Category Hint'. 
-    Your job is to clean and extract accurate attributes.
+    Strict Rules:
+    1. **Fix Messy Text**: Separate glued words.
+    2. **Standardize Type**: 'AI_Type' MUST be in Thai (e.g., ตู้เย็น, แอร์).
+    3. **Extract Kind (Crucial)**: Look for specific sub-types or features in the text.
+       - Refrigerator: 1 ประตู, 2 ประตู, Side by Side, Multi-Door
+       - Air Conditioner: Inverter, Fixed Speed, แขวน, ติดผนัง
+       - Washing Machine: ฝาบน, ฝาหน้า, 2 ถัง
+       - If found, put in 'AI_Kind'. If not, leave empty.
+    4. **Extract Spec**: Numbers for size/capacity (Q, BTU, etc).
     
-    Strict Rules for Extraction:
-    1. **AI_Brand**: Brand name (English preferred, e.g. Samsung, Toshiba).
-    2. **AI_Type**: Main Category in Thai (e.g. ตู้เย็น, แอร์, เครื่องซักผ้า, ทีวี).
-    3. **AI_Kind (Important!)**: Specific Sub-Type/Feature in Thai.
-       - **Refrigerator**: 1 ประตู, 2 ประตู, Side by Side, Multi-Door, Minibar
-       - **Air Conditioner**: Inverter, Fixed Speed, ติดผนัง, แขวนใต้ฝ้า, เคลื่อนที่
-       - **Washing Machine**: ฝาบน, ฝาหน้า, 2 ถัง
-       - **TV**: Smart TV, Android TV, Digital TV
-       - If unclear, leave empty string "".
-    4. **AI_Spec**: Capacity/Size numbers (e.g. 5.2 คิว, 9000 BTU, 10 kg, 55 นิ้ว).
-       - Keep the unit (คิว, BTU, kg, นิ้ว).
-    
-    Output JSON Array ONLY:
+    Output JSON Array ONLY (No Markdown, No code blocks):
     [
       {{
         "AI_Brand": "Brand",
         "AI_Type": "Category",
-        "AI_Kind": "Sub-Type",
-        "AI_Spec": "Size/Capacity",
+        "AI_Kind": "Kind",
+        "AI_Spec": "Spec",
         "AI_Tags": "Keywords"
       }}
     ]
@@ -287,8 +285,15 @@ def ask_gemini_extract(names):
             )
         )
         
-        # Clean & Parse
-        data = json.loads(response.text.strip())
+        # 🔥 จุดแก้ Error: ล้าง Code Block ออกก่อนแปลง JSON
+        txt = response.text.strip()
+        
+        # ถ้า AI เผลอใส่ ```json มา ให้ลบออกให้หมด
+        if "```" in txt:
+            txt = re.sub(r"^```json|^```", "", txt, flags=re.MULTILINE).strip()
+            txt = re.sub(r"```$", "", txt, flags=re.MULTILINE).strip()
+            
+        data = json.loads(txt)
         
         normalized_data = []
         for item in data:
@@ -299,7 +304,6 @@ def ask_gemini_extract(names):
                 "AI_Spec": item.get("AI_Spec") or "-",
                 "AI_Tags": item.get("AI_Tags") or ""
             }
-            # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
                 
@@ -309,7 +313,7 @@ def ask_gemini_extract(names):
 
     except Exception as e:
         print(f"AI Error: {e}")
-        # กรณี Error ให้คืนค่าว่างๆ ตามจำนวน Input เพื่อไม่ให้โปรแกรมพัง
+        # กรณี Error จริงๆ ให้คืนค่าว่างกลับไป โปรแกรมจะได้ไม่หยุดทำงาน
         return [{"AI_Brand": "Error", "AI_Type": "Error", "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""} for _ in names]
 def ask_gemini_filter(query, columns):
     # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
