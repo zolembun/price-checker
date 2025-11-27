@@ -415,20 +415,17 @@ if col_q2.button("ค้นหา AI", type="primary"):
                 
                 if result_json and 'filters' in result_json:
                     filters = result_json['filters']
-                    sort_order = result_json.get('sort_order') # รับค่าการเรียงลำดับ
+                    sort_order = result_json.get('sort_order')
                     
-                    # 1. เริ่มต้น: สมมติว่าเอาทุกแถวไว้ก่อน
                     final_mask = pd.Series([True] * len(df_search))
                     active_conds = []
                     
-                    # 2. จัดกลุ่ม Filter ตามคอลัมน์
                     from collections import defaultdict
                     grouped_filters = defaultdict(list)
                     for f in filters:
                         grouped_filters[f['column']].append(f)
                     
                     try:
-                        # 3. วนลูปทีละคอลัมน์
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
@@ -436,37 +433,43 @@ if col_q2.button("ค้นหา AI", type="primary"):
                             vals_log = []
                             
                             for f in conditions:
-                                op, val = f['operator'], f['value']
+                                op = f['operator']
+                                raw_val = f['value']
                                 
-                                s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0) if col == 'ราคาทุนต่อหน่วย' else df_search[col].astype(str)
-                                val = float(val) if col == 'ราคาทุนต่อหน่วย' else str(val)
+                                # 🔥 แก้ไขจุดตาย: ถ้าค่ามาเป็น List ให้แตกออกมาเช็คทีละตัว
+                                # (เช่น ['5', '6', '7'] -> เช็ค 5, เช็ค 6, เช็ค 7)
+                                values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
-                                if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
-                                elif op == 'equals': sub_mask = (s_val == val)
-                                elif op == 'gt': sub_mask = (s_val > val)
-                                elif op == 'gte': sub_mask = (s_val >= val)
-                                elif op == 'lt': sub_mask = (s_val < val)
-                                elif op == 'lte': sub_mask = (s_val <= val)
-                                else: sub_mask = pd.Series([False] * len(df_search))
-                                
-                                col_mask |= sub_mask
-                                vals_log.append(f"{val}")
+                                for val in values_list:
+                                    if col == 'ราคาทุนต่อหน่วย':
+                                        s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
+                                        val = float(val)
+                                    else:
+                                        s_val = df_search[col].astype(str)
+                                        val = str(val)
+                                    
+                                    if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
+                                    elif op == 'equals': sub_mask = (s_val == val)
+                                    elif op == 'gt': sub_mask = (s_val > val)
+                                    elif op == 'gte': sub_mask = (s_val >= val)
+                                    elif op == 'lt': sub_mask = (s_val < val)
+                                    elif op == 'lte': sub_mask = (s_val <= val)
+                                    else: sub_mask = pd.Series([False] * len(df_search))
+                                    
+                                    col_mask |= sub_mask # รวมพลัง OR
+                                    vals_log.append(f"{val}")
                             
                             final_mask &= col_mask
-                            active_conds.append(f"{col}: {' | '.join(vals_log)}")
+                            active_conds.append(f"{col}: {', '.join(vals_log)}")
                         
-                        # 4. ได้ผลลัพธ์แล้ว (แต่ยังไม่เรียง)
                         results = df_search[final_mask]
                         
-                        # 5. --- [เพิ่มใหม่] Logic การเรียงลำดับ ---
+                        # Logic เรียงลำดับ
                         if not results.empty and sort_order:
                             if sort_order == 'asc':
                                 results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
-                                st.toast("⬇️ เรียงจาก ถูก -> แพง")
                             elif sort_order == 'desc':
                                 results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=False)
-                                st.toast("⬆️ เรียงจาก แพง -> ถูก")
-                        # ----------------------------------------
 
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
@@ -479,7 +482,7 @@ if col_q2.button("ค้นหา AI", type="primary"):
                                 use_container_width=True, hide_index=True
                             )
                         else: 
-                            st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
+                            st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {'; '.join(active_conds)})")
                             
                     except Exception as e: st.error(f"Error: {e}")
                 else:
