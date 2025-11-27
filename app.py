@@ -243,28 +243,37 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ - อัปเกรด Prompt)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
     prompt = f"""
-    Role: Product Data Expert.
-    Task: Extract attributes from product names.
+    Role: Product Data Expert in Thailand.
+    Task: Extract structured data from product text.
     Input List: {json.dumps(names, ensure_ascii=False)}
     
-    Strict Rules:
-    1. **Fix Messy Text**: Separate glued words (e.g., "Refrigerator5.2" -> "Refrigerator" + "5.2").
-    2. **Standardize Type**: 'AI_Type' MUST be in Thai (e.g., "Refrigerator" -> "ตู้เย็น", "TV" -> "ทีวี").
-    3. **Extract Kind (NEW)**: 'AI_Kind' is Sub-Category/Feature.
-       - Fridge: 1 ประตู, 2 ประตู, Side by Side
-       - Washer: ฝาบน, ฝาหน้า, 2 ถัง
-       - Air: Inverter, Fixed Speed, แขวน, ติดผนัง
-    4. **Extract Spec**: Numbers for size/capacity (Q, kg, BTU).
+    Instruction: The input text contains 'Product Name' and sometimes 'Old Category Hint'. 
+    Your job is to clean and extract accurate attributes.
+    
+    Strict Rules for Extraction:
+    1. **AI_Brand**: Brand name (English preferred, e.g. Samsung, Toshiba).
+    2. **AI_Type**: Main Category in Thai (e.g. ตู้เย็น, แอร์, เครื่องซักผ้า, ทีวี).
+    3. **AI_Kind (Important!)**: Specific Sub-Type/Feature in Thai.
+       - **Refrigerator**: 1 ประตู, 2 ประตู, Side by Side, Multi-Door, Minibar
+       - **Air Conditioner**: Inverter, Fixed Speed, ติดผนัง, แขวนใต้ฝ้า, เคลื่อนที่
+       - **Washing Machine**: ฝาบน, ฝาหน้า, 2 ถัง
+       - **TV**: Smart TV, Android TV, Digital TV
+       - If unclear, leave empty string "".
+    4. **AI_Spec**: Capacity/Size numbers (e.g. 5.2 คิว, 9000 BTU, 10 kg, 55 นิ้ว).
+       - Keep the unit (คิว, BTU, kg, นิ้ว).
+    
     Output JSON Array ONLY:
-   Output JSON Array ONLY:
     [
       {{
         "AI_Brand": "Brand",
-        "AI_Type": "Main Category (Thai)",
-        "AI_Kind": "Sub Type (Thai) or empty string", 
-        "AI_Spec": "Spec",
+        "AI_Type": "Category",
+        "AI_Kind": "Sub-Type",
+        "AI_Spec": "Size/Capacity",
         "AI_Tags": "Keywords"
       }}
     ]
@@ -286,7 +295,7 @@ def ask_gemini_extract(names):
             new_item = {
                 "AI_Brand": item.get("AI_Brand") or "Unknown",
                 "AI_Type": item.get("AI_Type") or "Other",
-                "AI_Kind": item.get("AI_Kind") or "",  # <--- เพิ่มช่องนี้
+                "AI_Kind": item.get("AI_Kind") or "", 
                 "AI_Spec": item.get("AI_Spec") or "-",
                 "AI_Tags": item.get("AI_Tags") or ""
             }
@@ -300,7 +309,8 @@ def ask_gemini_extract(names):
 
     except Exception as e:
         print(f"AI Error: {e}")
-        return []
+        # กรณี Error ให้คืนค่าว่างๆ ตามจำนวน Input เพื่อไม่ให้โปรแกรมพัง
+        return [{"AI_Brand": "Error", "AI_Type": "Error", "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""} for _ in names]
 def ask_gemini_filter(query, columns):
     # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
     prompt = f"""
@@ -553,6 +563,9 @@ with tab2:
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
     
   # ลบอันเดิม แล้ววางอันนี้แทน (ใน Tab 2 ส่วนล่างสุด)
+# -------------------------------------------------------------
+    # ส่วนค้นหา AI (ฉบับสมบูรณ์: รองรับทศนิยม + รองรับลูกน้ำหลักพัน)
+    # -------------------------------------------------------------
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
@@ -594,27 +607,30 @@ with tab2:
                                     s_val_num = None
                                     val_num = None
 
-                                    # ถ้าเป็นการเช็ค มากกว่า/น้อยกว่า (gte, lte) หรือคอลัมน์ราคา
+                                    # ตรวจสอบว่าเป็นเงื่อนไขตัวเลขหรือไม่ (รวมถึงราคา)
                                     if col == 'ราคาทุนต่อหน่วย' or (col == 'AI_Spec' and op in ['gt', 'gte', 'lt', 'lte']):
                                         is_numeric_check = True
                                         try:
-                                            # แปลงค่าที่จะค้นหาเป็นตัวเลข
-                                            val_num = float(val)
+                                            # 1. จัดการฝั่งคำค้นหา (val): ลบลูกน้ำออกก่อนแปลง
+                                            val_clean_num = str(val).replace(',', '')
+                                            val_num = float(val_clean_num)
                                             
+                                            # 2. จัดการฝั่งข้อมูลในตาราง (s_val):
                                             if col == 'ราคาทุนต่อหน่วย':
                                                 s_val_num = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                             else:
-                                                # แกะตัวเลขออกจากข้อความสเปค (เช่น "5.5 คิว" -> 5.5)
-                                                # ใช้ Regex ดึงตัวเลขแรกที่เจอ
-                                                s_val_num = df_search[col].astype(str).str.extract(r'(\d+\.?\d*)')[0].astype(float).fillna(0)
+                                                # ลบลูกน้ำออกจากข้อความสเปคก่อน (เช่น "12,000 BTU" -> "12000 BTU")
+                                                # แล้วค่อยใช้ Regex ดึงตัวเลข
+                                                s_val_str = df_search[col].astype(str).str.replace(',', '')
+                                                s_val_num = s_val_str.str.extract(r'(\d+\.?\d*)')[0].astype(float).fillna(0)
                                         except:
-                                            is_numeric_check = False # ถ้าแปลงไม่ได้ ให้กลับไปใช้แบบข้อความ
+                                            is_numeric_check = False # ถ้าแปลงไม่ผ่าน ให้กลับไปใช้ Text Search
                                     
                                     # ========================================================
                                     # เริ่มเปรียบเทียบ
                                     # ========================================================
                                     if is_numeric_check:
-                                        # เทียบแบบตัวเลข (แม่นยำ 100% สำหรับ 5.5 vs 1.6)
+                                        # เทียบแบบตัวเลข (รองรับ 12,000 vs 9,000 ได้แล้ว)
                                         if op == 'gt': sub_mask = (s_val_num > val_num)
                                         elif op == 'gte': sub_mask = (s_val_num >= val_num)
                                         elif op == 'lt': sub_mask = (s_val_num < val_num)
@@ -623,14 +639,14 @@ with tab2:
                                         else: sub_mask = pd.Series([False] * len(df_search))
                                         
                                     else:
-                                        # เทียบแบบข้อความ (Text) เหมือนเดิม
+                                        # เทียบแบบข้อความ (Text)
                                         s_val = df_search[col].astype(str)
                                         val = str(val)
                                         if val.endswith(".0"): val = val[:-2]
 
                                         if op == 'contains' or op == 'in': 
-                                            s_val_clean = s_val.str.replace(" ", "")
-                                            val_clean = val.replace(" ", "")
+                                            s_val_clean = s_val.str.replace(" ", "").str.replace(",", "")
+                                            val_clean = val.replace(" ", "").replace(",", "")
                                             sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
                                         elif op == 'equals': sub_mask = (s_val == val)
                                         else: sub_mask = pd.Series([False] * len(df_search))
