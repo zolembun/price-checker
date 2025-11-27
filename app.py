@@ -436,18 +436,28 @@ if col_q2.button("ค้นหา AI", type="primary"):
                                 op = f['operator']
                                 raw_val = f['value']
                                 
-                                # 🔥 แก้ไขจุดตาย: ถ้าค่ามาเป็น List ให้แตกออกมาเช็คทีละตัว
-                                # (เช่น ['5', '6', '7'] -> เช็ค 5, เช็ค 6, เช็ค 7)
+                                # แตก List ออกมา (เผื่อ AI ส่งมาหลายค่า)
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
                                     if col == 'ราคาทุนต่อหน่วย':
+                                        # จัดการราคา (ตัวเลข)
                                         s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                         val = float(val)
                                     else:
+                                        # จัดการข้อความ/สเปค
                                         s_val = df_search[col].astype(str)
-                                        val = str(val)
-                                    
+                                        
+                                        # 🔥 [แก้จุดตาย] ถ้าเป็นเลขจำนวนเต็ม (เช่น 5.0) ให้ตัด .0 ทิ้ง เหลือแค่ "5"
+                                        # เพื่อให้ contains("5") ไปเจอ "5.2", "5.9" ได้
+                                        try:
+                                            if isinstance(val, (int, float)):
+                                                if val == int(val): val = int(val)
+                                            val = str(val)
+                                        except:
+                                            val = str(val)
+
+                                    # เริ่มเปรียบเทียบ
                                     if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
                                     elif op == 'equals': sub_mask = (s_val == val)
                                     elif op == 'gt': sub_mask = (s_val > val)
@@ -456,15 +466,15 @@ if col_q2.button("ค้นหา AI", type="primary"):
                                     elif op == 'lte': sub_mask = (s_val <= val)
                                     else: sub_mask = pd.Series([False] * len(df_search))
                                     
-                                    col_mask |= sub_mask # รวมพลัง OR
+                                    col_mask |= sub_mask # Logic OR ภายในคอลัมน์
                                     vals_log.append(f"{val}")
                             
-                            final_mask &= col_mask
-                            active_conds.append(f"{col}: {', '.join(vals_log)}")
+                            final_mask &= col_mask # Logic AND ข้ามคอลัมน์
+                            active_conds.append(f"{col}: {'|'.join(vals_log)}")
                         
                         results = df_search[final_mask]
                         
-                        # Logic เรียงลำดับ
+                        # Logic เรียงลำดับ (Sorting)
                         if not results.empty and sort_order:
                             if sort_order == 'asc':
                                 results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
@@ -486,5 +496,6 @@ if col_q2.button("ค้นหา AI", type="primary"):
                             
                     except Exception as e: st.error(f"Error: {e}")
                 else:
+                    # Fallback Search
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
