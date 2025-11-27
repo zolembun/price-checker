@@ -175,18 +175,32 @@ def append_to_sheet(data_values):
 
 @st.cache_data(ttl=600)
 def merge_data(df_main, df_mem):
+    # ถ้าไม่มีข้อมูล AI ให้คืนค่าเดิมไปก่อน
     if df_mem.empty: return df_main.copy()
+    
+    # Copy เพื่อไม่ให้กระทบตารางหลัก
     df_main_c = df_main.copy()
     df_mem_c = df_mem.copy()
-    df_main_c['รหัสสินค้า'] = df_main_c['รหัสสินค้า'].astype(str).str.strip()
-    df_mem_c['SKU'] = df_mem_c['SKU'].astype(str).str.strip()
-    return pd.merge(df_main_c, df_mem_c, left_on='รหัสสินค้า', right_on='SKU', how='left')
-
-# Helper Functions
-def clean_text(text):
-    if not isinstance(text, str): text = str(text)
-    return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
-
+    
+    # 🔥 จุดสำคัญ 1: แปลงเป็นตัวหนังสือ + ตัวพิมพ์ใหญ่ + ตัดช่องว่าง (Normalize)
+    # เพื่อแก้ปัญหา "sku01" ไม่เท่ากับ "SKU01" หรือ " SKU01 "
+    df_main_c['join_key'] = df_main_c['รหัสสินค้า'].astype(str).str.strip().str.upper()
+    df_mem_c['join_key'] = df_mem_c['SKU'].astype(str).str.strip().str.upper()
+    
+    # 2. จับคู่ (Merge) ด้วยคอลัมน์พิเศษที่สร้างขึ้น (join_key)
+    merged = pd.merge(df_main_c, df_mem_c, on='join_key', how='left')
+    
+    # 3. ถมช่องว่าง (สำคัญมาก: ถ้า AI ยังไม่รู้จัก ให้ใส่ค่าว่าง อย่าให้เป็น NaN)
+    cols_to_fix = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags']
+    for col in cols_to_fix:
+        if col in merged.columns:
+            merged[col] = merged[col].fillna('').astype(str)
+    
+    # ลบคอลัมน์ช่วย (join_key) ทิ้ง
+    if 'join_key' in merged.columns:
+        del merged['join_key']
+            
+    return merged
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (Force JSON + Debug)
 # ---------------------------------------------------------
@@ -222,28 +236,40 @@ def ask_gemini_extract(names):
 
 def ask_gemini_filter(query, columns):
     prompt = f"""
-    Role: Search Engine. Convert "{query}" to JSON. Cols: {columns}
+    Role: คุณคือ Search Engine อัจฉริยะ แปลงคำค้นหา "{query}" เป็น JSON Filter
+    Columns: {columns}
     
-    Rules:
-    1. **Primary**: Filter 'AI_Type'/'AI_Brand' if mentioned.
-    2. **Range**: "5-8" -> value: ["5", "6", "7", "8"] (Integers only).
-    3. **Price Filter**: 
-       - If user asks "price?" or "lowest/highest price" WITHOUT specific number -> DO NOT create filter for 'ราคาทุนต่อหน่วย'.
-       - Create filter ONLY if number exists (e.g. "< 5000").
-    4. **Sorting (สำคัญ)**:
-       - "ถูกสุด", "ต่ำสุด", "น้อยสุด" -> sort_order: "asc"
-       - "แพงสุด", "สูงสุด", "มากสุด" -> sort_order: "desc"
-       - Default -> sort_order: null
+    Instruction (Strict Rules):
+    1. **Primary Filter**: ระบุ 'AI_Type'/'AI_Brand' เสมอ (เช่น "ตู้เย็น" -> AI_Type contains "ตู้เย็น")
     
-    Output JSON:
+    2. **Decimal Range Strategy (สำคัญมาก!)**: 
+       - หากเจอช่วงที่มีทศนิยม (เช่น "5.2 - 7.3 คิว") 
+       - **ให้แปลงเป็นเลขจำนวนเต็ม (Integer) ทุกตัวที่ครอบคลุมช่วงนั้น**
+       - Logic: เอาเลขหน้าสุด ถึง เลขหลังสุด (ปัดเศษทิ้งได้)
+       - ตัวอย่าง: "5.2 - 7.3" -> value: ["5", "6", "7"] 
+         (เพื่อให้ค้นหาเจอทั้ง 5.x, 6.x, 7.x)
+       - ตัวอย่าง: "8 - 10.5" -> value: ["8", "9", "10"]
+       
+    3. **Price Logic**: 
+       - ห้ามกรองราคาถ้าไม่มีตัวเลข
+       - มีตัวเลข -> ใช้ lte (ไม่เกิน), gte (ตั้งแต่)
+    
+    Output Format (JSON):
     {{
-        "filters": [ {{ "column": "...", "operator": "...", "value": "..." }} ],
-        "sort_order": "asc" 
+        "filters": [
+            {{ "column": "AI_Type", "operator": "contains", "value": "ตู้เย็น" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "5" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "6" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "7" }}
+        ]
     }}
     """
     try:
         res = ai_model.generate_content(
-            prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
         )
         return json.loads(res.text.strip())
     except: return None
