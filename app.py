@@ -271,13 +271,13 @@ def ask_gemini_extract(names):
         
         normalized_data = []
         for item in data:
-        new_item = {
-            "AI_Brand": item.get("AI_Brand") or "Unknown",
-            "AI_Type": item.get("AI_Type") or "Other",
-            "AI_Kind": item.get("AI_Kind") or "",  # <--- เพิ่มบรรทัดนี้
-            "AI_Spec": item.get("AI_Spec") or "-",
-            "AI_Tags": item.get("AI_Tags") or ""
-        }
+            new_item = {
+                "AI_Brand": item.get("AI_Brand") or "Unknown",
+                "AI_Type": item.get("AI_Type") or "Other",
+                "AI_Kind": item.get("AI_Kind") or "",  # <--- เพิ่มช่องนี้
+                "AI_Spec": item.get("AI_Spec") or "-",
+                "AI_Tags": item.get("AI_Tags") or ""
+            }
             # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
@@ -290,20 +290,23 @@ def ask_gemini_extract(names):
         print(f"AI Error: {e}")
         return []
 def ask_gemini_filter(query, columns):
+    # ปรับ Prompt ให้ฉลาดขึ้น รู้จักแยก "ชนิด" (1 ประตู) ออกจาก "ประเภท" (ตู้เย็น)
     prompt = f"""
     Role: คุณคือ Search Engine อัจฉริยะ แปลงคำค้นหา "{query}" เป็น JSON Filter
     Columns: {columns}
     
     Instruction (Strict Rules):
-    1. **Primary Filter**: ระบุ 'AI_Type'/'AI_Brand' เสมอ (เช่น "ตู้เย็น" -> AI_Type contains "ตู้เย็น")
+    1. **Category vs Kind Strategy (สำคัญมาก!)**:
+       - ให้แยกแยะ "ประเภทหลัก" (AI_Type) กับ "ลักษณะย่อย/ชนิด" (AI_Kind)
+       - ถ้า User พิมพ์ "ตู้เย็น" เฉยๆ -> กรองแค่ AI_Type="ตู้เย็น"
+       - ถ้า User พิมพ์ "ตู้เย็น 1 ประตู" -> ต้องกรองทั้ง AI_Type="ตู้เย็น" **และ** AI_Kind="1 ประตู"
+       - ตัวอย่าง: "เครื่องซักผ้า ฝาบน" -> AI_Type="เครื่องซักผ้า", AI_Kind="ฝาบน"
+       - ตัวอย่าง: "แอร์ Inverter" -> AI_Type="แอร์", AI_Kind="Inverter"
     
-    2. **Decimal Range Strategy (สำคัญมาก!)**: 
+    2. **Decimal Range Strategy**: 
        - หากเจอช่วงที่มีทศนิยม (เช่น "5.2 - 7.3 คิว") 
        - **ให้แปลงเป็นเลขจำนวนเต็ม (Integer) ทุกตัวที่ครอบคลุมช่วงนั้น**
-       - Logic: เอาเลขหน้าสุด ถึง เลขหลังสุด (ปัดเศษทิ้งได้)
        - ตัวอย่าง: "5.2 - 7.3" -> value: ["5", "6", "7"] 
-         (เพื่อให้ค้นหาเจอทั้ง 5.x, 6.x, 7.x)
-       - ตัวอย่าง: "8 - 10.5" -> value: ["8", "9", "10"]
        
     3. **Price Logic**: 
        - ห้ามกรองราคาถ้าไม่มีตัวเลข
@@ -313,10 +316,10 @@ def ask_gemini_filter(query, columns):
     {{
         "filters": [
             {{ "column": "AI_Type", "operator": "contains", "value": "ตู้เย็น" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "5" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "6" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "7" }}
-        ]
+            {{ "column": "AI_Kind", "operator": "contains", "value": "1 ประตู" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "5" }}
+        ],
+        "sort_order": "asc"
     }}
     """
     try:
@@ -526,7 +529,7 @@ with tab2:
 if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
-                cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย']
+                cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
                 result_json = ask_gemini_filter(query2, cols_ai)
                 
                 if result_json and 'filters' in result_json:
