@@ -448,21 +448,22 @@ with tab1:
 with tab2:
     st.info("💡 เหมาะสำหรับ: ค้นหาแบบประโยค เช่น 'ทีวี Samsung ไม่เกินหมื่น', 'แอร์ inverter'")
     
+    # คำนวณสินค้าใหม่
     processed_skus = df_mem['SKU'].astype(str).str.strip().tolist() if not df_mem.empty else []
     new_items_df = df_main[~df_main['รหัสสินค้า'].astype(str).str.strip().isin(processed_skus)]
     new_count = len(new_items_df)
     
-# วางทับส่วน st.expander เดิม
+    # --- ส่วนจัดการสมอง AI ---
     with st.expander(f"⚙️ จัดการสมอง AI ({len(df_mem)} รายการเรียนรู้แล้ว)"):
         c_a1, c_a2 = st.columns([3, 1])
         c_a1.write(f"สินค้าใหม่ที่ AI ยังไม่รู้จัก: **{new_count}** รายการ")
         
-        # --- ส่วนปุ่มสอน AI (แก้ไข Indent เรียบร้อย) ---
+        # ปุ่มสอน AI
         if new_count > 0:
             if c_a2.button("🚀 สอน AI เดี๋ยวนี้", type="primary"):
                 with st.status("🤖 AI กำลังเรียนรู้...", expanded=True) as status:
                     
-                    # 1. เช็คคอลัมน์ชนิด
+                    # 1. เช็คคอลัมน์ชนิด (ถ้าไม่มีสร้างใหม่)
                     if 'ชนิด' not in new_items_df.columns:
                         new_items_df['ชนิด'] = ''
                         
@@ -479,6 +480,7 @@ with tab2:
                         chunk = to_proc[i:i+BATCH]
                         status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
                         
+                        # รวมชื่อ + ชนิด ส่งให้ AI
                         names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
                         ai_res = ask_gemini_extract(names_for_ai)
                         
@@ -504,23 +506,26 @@ with tab2:
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
 
-        # --- ส่วนปุ่มล้างขยะ (รวมอยู่ใน Expander เดียวกัน) ---
         st.divider()
         st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
         
-        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary", key="clean_btn_v2"):
+        # ปุ่มล้างขยะ (ใส่ key กันซ้ำ และจัดย่อหน้าให้ตรง)
+        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary", key="btn_cleanup_final"):
             with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
                 valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
                 df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
                 
+                # กรองเอาเฉพาะที่มีใน Main
                 df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
+                # ลบตัวซ้ำ
                 df_mem_clean = df_mem_clean.drop_duplicates(subset=['check_key'], keep='last')
+                
                 del df_mem_clean['check_key']
                 
                 deleted_count = len(df_mem) - len(df_mem_clean)
                 
                 if deleted_count > 0:
-                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
+                    status.write(f"🗑️ พบข้อมูลขยะ/ตัวซ้ำ {deleted_count} รายการ... กำลังลบ")
                     success = overwrite_memory_sheet(df_mem_clean)
                     if success:
                         status.update(label="✅ ลบเสร็จสิ้น!", state="complete")
@@ -529,91 +534,18 @@ with tab2:
                         st.rerun()
                 else:
                     status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว", state="complete")
-
-        # --- ส่วนปุ่มล้างขยะ (รวมอยู่ใน Expander เดียวกัน) ---
-        st.divider()
-        st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
-        
-        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary"):
-            with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
-                valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
-                df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
-                
-                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
-                df_mem_clean = df_mem_clean.drop_duplicates(subset=['check_key'], keep='last')
-                del df_mem_clean['check_key']
-                
-                deleted_count = len(df_mem) - len(df_mem_clean)
-                
-                if deleted_count > 0:
-                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
-                    success = overwrite_memory_sheet(df_mem_clean)
-                    if success:
-                        status.update(label="✅ ลบเสร็จสิ้น!", state="complete")
-                        st.cache_data.clear()
-                        time.sleep(2)
-                        st.rerun()
-                else:
-                    status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว", state="complete")
-
-            # ========================================================
-        # 🔥 ส่วนที่เพิ่มใหม่: ปุ่มล้างขยะ (วางต่อท้าย แต่อยู่ใน expander)
-        # ========================================================
-        st.divider()
-        st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
-        
-      if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary", key="btn_cleanup_fix_v2"):
-            with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
-                # 1. หาสินค้าที่มีอยู่จริงใน Main
-                valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
-                
-                # 2. กรอง df_mem ให้เหลือเฉพาะที่มีใน valid_skus
-                # สร้าง column ชั่วคราวเพื่อเทียบ
-                df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
-
-                # -------------------------------------------------------
-                # 🔥 แก้ไขจุดนี้: กรองสินค้าที่มีจริง AND ลบตัวที่ SKU ซ้ำกัน
-                # -------------------------------------------------------
-                
-                # Step A: เอาเฉพาะที่มีใน Main (เหมือนเดิม)
-                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
-                
-                # Step B: ลบตัวซ้ำ (เพิ่มใหม่!) 
-                # keep='last' หมายถึงถ้าเจอซ้ำ ให้เก็บตัวล่าสุดไว้ (เผื่อมีการอัปเดตข้อมูลใหม่กว่า)
-                df_mem_clean = df_mem_clean.drop_duplicates(subset=['check_key'], keep='last')
-                
-                # -------------------------------------------------------
-                
-                # คัดเอาเฉพาะที่ key ตรงกัน
-                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
-                
-                # ลบ column ช่วยเหลือทิ้ง
-                del df_mem_clean['check_key']
-                
-                deleted_count = len(df_mem) - len(df_mem_clean)
-                
-                if deleted_count > 0:
-                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
-                    # เรียกใช้ฟังก์ชัน overwrite ที่เราสร้างไว้ข้างบน
-                    success = overwrite_memory_sheet(df_mem_clean) 
-                    if success:
-                        status.update(label=f"✅ ลบเสร็จสิ้น! (เหลือ {len(df_mem_clean)} รายการ)", state="complete")
-                        st.cache_data.clear()
-                        time.sleep(2)
-                        st.rerun()
-                else:
-                    status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว ไม่ต้องลบ", state="complete")
 
     st.divider()
     
+    # --- ส่วนค้นหา AI ---
     df_search = merge_data(df_main, df_mem)
     
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
-   # วางต่อจากบรรทัด: query2 = col_q1.text_input(...)
-if col_q2.button("ค้นหา AI", type="primary"):
-        with st.spinner('🤖 AI กำลังคิด...'):
-                # 1. เพิ่ม AI_Kind เข้าไปในลิสต์คอลัมน์
+    
+    if col_q2.button("ค้นหา AI", type="primary"):
+        if query2:
+            with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
                 result_json = ask_gemini_filter(query2, cols_ai)
                 
@@ -647,7 +579,6 @@ if col_q2.button("ค้นหา AI", type="primary"):
                                         val = float(val)
                                     else:
                                         s_val = df_search[col].astype(str)
-                                        # ตัดทศนิยม .0
                                         try:
                                             if isinstance(val, (int, float)) and val == int(val):
                                                 val = str(int(val))
@@ -677,8 +608,6 @@ if col_q2.button("ค้นหา AI", type="primary"):
 
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
-                            
-                            # 2. เพิ่ม AI_Kind เข้าไปในตารางแสดงผล
                             st.dataframe(
                                 results[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ราคาทุนต่อหน่วย', 'จำนวนสต้อก', 'AI_Brand', 'AI_Spec', 'AI_Kind']],
                                 column_config={
