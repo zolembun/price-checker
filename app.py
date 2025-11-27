@@ -142,18 +142,30 @@ def load_data_master():
 
         # AI Memory Data
         try:
-           res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:F").execute()
+            # 🔥 แก้ไขจุดที่ 1: ดึงข้อมูลถึงคอลัมน์ F (เพื่อให้ได้ AI_Kind)
+            res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:F").execute()
             vals_mem = res_mem.get('values', [])
             
+            # 🔥 แก้ไขจุดที่ 2: เพิ่ม AI_Kind ในหัวข้อคอลัมน์
+            cols_mem = ['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'AI_Kind']
+
             if vals_mem and len(vals_mem) > 1:
                 headers = vals_mem[0]
                 rows = vals_mem[1:]
+                # เติมค่าว่างให้ครบทุกคอลัมน์ถ้ามันแหว่ง
                 fixed_rows = [r + [None]*(len(headers)-len(r)) for r in rows]
                 df_mem = pd.DataFrame(fixed_rows, columns=headers)
+                
+                # ถ้าโหลดมาแล้วไม่มีคอลัมน์ AI_Kind ให้เติมเข้าไป
+                if 'AI_Kind' not in df_mem.columns:
+                    df_mem['AI_Kind'] = ''
             else:
-                df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
-        except:
-            df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
+                # สร้างตารางเปล่าแบบมี AI_Kind รอไว้
+                df_mem = pd.DataFrame(columns=cols_mem)
+        except Exception as e:
+            # กรณี Error ก็สร้างตารางเปล่าที่มี AI_Kind ไว้ก่อน
+            print(f"Load Mem Error: {e}")
+            df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'AI_Kind'])
 
         return df_main, df_mem, file_name, last_update
 
