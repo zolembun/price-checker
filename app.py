@@ -564,18 +564,17 @@ with tab2:
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
     
+  # ลบอันเดิม แล้ววางอันนี้แทน (ใน Tab 2 ส่วนล่างสุด)
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
                 result_json = ask_gemini_filter(query2, cols_ai)
                 
-                # --- [DEBUG] แสดงสิ่งที่ AI คิด (ช่วยให้รู้ว่า AI ผิดหรือโค้ดผิด) ---
-                with st.expander("🕵️ Debug: ดูว่า AI ส่งเงื่อนไขอะไรมา?"):
+                # Debug ดูค่าที่ AI ส่งมา
+                with st.expander("🕵️ Debug: ดูเบื้องหลังการคิด"):
                     st.json(result_json)
-                    st.write(f"จำนวนสินค้าทั้งหมดก่อนกรอง: {len(df_search)}")
-                    # เช็คดูซิว่าคอลัมน์ AI_Kind มีข้อมูลไหม
-                    st.write("ตัวอย่างข้อมูลในคอลัมน์ AI_Kind:", df_search['AI_Kind'].unique()[:10])
+                    st.write(f"จำนวนสินค้าทั้งหมด: {len(df_search)}")
 
                 if result_json and 'filters' in result_json:
                     filters = result_json['filters']
@@ -584,7 +583,6 @@ with tab2:
                     final_mask = pd.Series([True] * len(df_search))
                     active_conds = []
                     
-                    # จัดกลุ่ม Filter ตามคอลัมน์
                     from collections import defaultdict
                     grouped_filters = defaultdict(list)
                     for f in filters:
@@ -593,10 +591,6 @@ with tab2:
                     try:
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
-                            
-                            # Logic: เงื่อนไขในคอลัมน์เดียวกัน ใช้ OR (เช่น "1 ประตู" หรือ "2 ประตู")
-                            # ยกเว้น "ราคาทุน" หรือตัวเลข ใช้ AND (เช่น > 2000 และ < 5000) 
-                            # แต่เพื่อความง่ายและรองรับเคสส่วนใหญ่ เราใช้ Logic เดิมที่ปรับปรุงเรื่อง Space
                             
                             col_mask = pd.Series([False] * len(df_search))
                             vals_log = []
@@ -607,40 +601,38 @@ with tab2:
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
-                                    # เตรียมข้อมูลฝั่งตาราง (s_val) และฝั่งเงื่อนไข (val)
+                                    # เตรียมข้อมูล (ตัด .0 ทิ้งถ้ามี)
                                     if col == 'ราคาทุนต่อหน่วย':
                                         s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                         val = float(val)
                                     else:
                                         s_val = df_search[col].astype(str)
                                         val = str(val)
-                                        # 🔥 แก้ไขจุดตาย: ตัด .0 ทิ้ง (กรณีเป็นเลข)
                                         if val.endswith(".0"): val = val[:-2]
 
-                                    # เปรียบเทียบ
-                                    if op == 'contains': 
-                                        # 🔥 เทคนิคลับ: ตัดช่องว่างออกให้หมดก่อนเทียบ (แก้ปัญหา "1 ประตู" vs "1ประตู")
+                                    # --- 🔥 จุดแก้ไขสำคัญอยู่ตรงนี้ 🔥 ---
+                                    # เพิ่ม "or op == 'in'" ให้มันทำงานเหมือน contains
+                                    if op == 'contains' or op == 'in': 
+                                        # ตัดช่องว่างทิ้งก่อนเทียบ (แก้ปัญหา 1 ประตู vs 1ประตู)
                                         s_val_clean = s_val.str.replace(" ", "")
                                         val_clean = val.replace(" ", "")
                                         sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
                                         
-                                    elif op == 'equals': 
-                                        sub_mask = (s_val == val)
+                                    elif op == 'equals': sub_mask = (s_val == val)
                                     elif op == 'gt': sub_mask = (s_val > val)
                                     elif op == 'gte': sub_mask = (s_val >= val)
                                     elif op == 'lt': sub_mask = (s_val < val)
                                     elif op == 'lte': sub_mask = (s_val <= val)
                                     else: sub_mask = pd.Series([False] * len(df_search))
                                     
-                                    col_mask |= sub_mask # OR ภายในคอลัมน์เดียวกัน
+                                    col_mask |= sub_mask
                                     vals_log.append(f"{val}")
                             
-                            final_mask &= col_mask # AND ระหว่างคอลัมน์
+                            final_mask &= col_mask
                             active_conds.append(f"{col}: {'|'.join(vals_log)}")
                         
                         results = df_search[final_mask]
                         
-                        # Sorting
                         if not results.empty and sort_order:
                             if sort_order == 'asc': results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=True)
                             elif sort_order == 'desc': results = results.sort_values(by='ราคาทุนต่อหน่วย', ascending=False)
@@ -657,10 +649,8 @@ with tab2:
                             )
                         else: 
                             st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {'; '.join(active_conds)})")
-                            st.info("💡 คำแนะนำ: ลองกดปุ่ม '🔄 รีโหลด' ด้านบน เพื่อเคลียร์ Cache ข้อมูล")
                             
-                    except Exception as e: st.error(f"Error logic: {e}")
+                    except Exception as e: st.error(f"Error: {e}")
                 else:
-                    # Fallback Search (หาแบบโง่ๆ ด้วย text)
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
