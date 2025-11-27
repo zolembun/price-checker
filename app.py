@@ -456,55 +456,78 @@ with tab2:
         c_a1, c_a2 = st.columns([3, 1])
         c_a1.write(f"สินค้าใหม่ที่ AI ยังไม่รู้จัก: **{new_count}** รายการ")
         
-      if new_count > 0:
+        # --- ส่วนปุ่มสอน AI (แก้ไข Indent เรียบร้อย) ---
+        if new_count > 0:
             if c_a2.button("🚀 สอน AI เดี๋ยวนี้", type="primary"):
                 with st.status("🤖 AI กำลังเรียนรู้...", expanded=True) as status:
-                
-                # 1. เช็คว่ามีคอลัมน์ 'ชนิด' ไหม (ถ้าไม่มีสร้างใหม่)
-                if 'ชนิด' not in new_items_df.columns:
-                    new_items_df['ชนิด'] = ''
                     
-                # 2. เปลี่ยนชื่อคอลัมน์เตรียมส่ง (เอา 'ชนิด' มาด้วย)
-                to_proc = new_items_df[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ชนิด']].rename(
-                    columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
-                ).to_dict('records')
+                    # 1. เช็คคอลัมน์ชนิด
+                    if 'ชนิด' not in new_items_df.columns:
+                        new_items_df['ชนิด'] = ''
+                        
+                    # 2. เตรียมข้อมูล (ชื่อ + ชนิดเดิม)
+                    to_proc = new_items_df[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ชนิด']].rename(
+                        columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
+                    ).to_dict('records')
 
-                BATCH = 10
-                res_save = []
-                total_batches = (len(to_proc) // BATCH) + 1
-                
-                for i in range(0, len(to_proc), BATCH):
-                    chunk = to_proc[i:i+BATCH]
-                    status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
+                    BATCH = 10
+                    res_save = []
+                    total_batches = (len(to_proc) // BATCH) + 1
                     
-                    # 🔥 แก้ไขตรงนี้: ส่ง "ชื่อ" + "ชนิดเดิม" ไปให้ AI
-                    names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
+                    for i in range(0, len(to_proc), BATCH):
+                        chunk = to_proc[i:i+BATCH]
+                        status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
+                        
+                        names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
+                        ai_res = ask_gemini_extract(names_for_ai)
+                        
+                        for idx, item in enumerate(chunk):
+                            ar = ai_res[idx] if idx < len(ai_res) else {}
+                            res_save.append([
+                                item['SKU'], 
+                                ar.get('AI_Brand','Unknown'), 
+                                ar.get('AI_Type','Other'), 
+                                ar.get('AI_Spec','-'), 
+                                ar.get('AI_Tags',''),
+                                ar.get('AI_Kind','') 
+                            ])
+                        time.sleep(4)
                     
-                    # เรียก AI
-                    ai_res = ask_gemini_extract(names_for_ai)
-                    
-                    for idx, item in enumerate(chunk):
-                        ar = ai_res[idx] if idx < len(ai_res) else {}
-                        res_save.append([
-                            item['SKU'], 
-                            ar.get('AI_Brand','Unknown'), 
-                            ar.get('AI_Type','Other'), 
-                            ar.get('AI_Spec','-'), 
-                            ar.get('AI_Tags',''),
-                            ar.get('AI_Kind','') # ใส่ช่อง Kind
-                        ])
-                    
-                    time.sleep(4)
-                
-                if res_save:
-                    append_to_sheet(res_save)
-                    status.update(label="เสร็จสิ้น!", state="complete")
-                    st.balloons()
-                    st.cache_data.clear()
-                    time.sleep(1)
-                    st.rerun()
+                    if res_save:
+                        append_to_sheet(res_save)
+                        status.update(label="เสร็จสิ้น!", state="complete")
+                        st.balloons()
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
+
+        # --- ส่วนปุ่มล้างขยะ (รวมอยู่ใน Expander เดียวกัน) ---
+        st.divider()
+        st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
+        
+        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary"):
+            with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
+                valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
+                df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
+                
+                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
+                df_mem_clean = df_mem_clean.drop_duplicates(subset=['check_key'], keep='last')
+                del df_mem_clean['check_key']
+                
+                deleted_count = len(df_mem) - len(df_mem_clean)
+                
+                if deleted_count > 0:
+                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
+                    success = overwrite_memory_sheet(df_mem_clean)
+                    if success:
+                        status.update(label="✅ ลบเสร็จสิ้น!", state="complete")
+                        st.cache_data.clear()
+                        time.sleep(2)
+                        st.rerun()
+                else:
+                    status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว", state="complete")
 
             # ========================================================
         # 🔥 ส่วนที่เพิ่มใหม่: ปุ่มล้างขยะ (วางต่อท้าย แต่อยู่ใน expander)
