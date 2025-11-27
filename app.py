@@ -582,10 +582,8 @@ with tab2:
 
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
-    
-  # ลบอันเดิม แล้ววางอันนี้แทน (ใน Tab 2 ส่วนล่างสุด)
-# -------------------------------------------------------------
-    # ส่วนค้นหา AI (ฉบับสมบูรณ์: รองรับทศนิยม + รองรับลูกน้ำหลักพัน)
+    # -------------------------------------------------------------
+    # ส่วนค้นหา AI (ฉบับ Final Fix: แก้ตรรกะช่วงตัวเลข AND/OR)
     # -------------------------------------------------------------
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
@@ -612,7 +610,15 @@ with tab2:
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
-                            col_mask = pd.Series([False] * len(df_search))
+                            # 🔥 Logic ใหม่: แยกตัวแปรสำหรับเก็บผลลัพธ์ 2 แบบ
+                            # 1. range_mask (สำหรับ > < >= <=) -> เริ่มต้น True แล้วใช้ AND (&) ตัดออก
+                            range_mask = pd.Series([True] * len(df_search))
+                            has_range = False
+                            
+                            # 2. choice_mask (สำหรับ contains, equals) -> เริ่มต้น False แล้วใช้ OR (|) เพิ่มเข้า
+                            choice_mask = pd.Series([False] * len(df_search))
+                            has_choice = False
+
                             vals_log = []
                             
                             for f in conditions:
@@ -621,46 +627,41 @@ with tab2:
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
-                                    # ========================================================
-                                    # 🔥 โซนจัดการตัวเลข (Numeric Handling)
-                                    # ========================================================
+                                    # =================================================
+                                    # 🔢 โซนจัดการตัวเลข (Numeric Handling)
+                                    # =================================================
                                     is_numeric_check = False
                                     s_val_num = None
                                     val_num = None
 
-                                    # ตรวจสอบว่าเป็นเงื่อนไขตัวเลขหรือไม่ (รวมถึงราคา)
                                     if col == 'ราคาทุนต่อหน่วย' or (col == 'AI_Spec' and op in ['gt', 'gte', 'lt', 'lte']):
                                         is_numeric_check = True
                                         try:
-                                            # 1. จัดการฝั่งคำค้นหา (val): ลบลูกน้ำออกก่อนแปลง
                                             val_clean_num = str(val).replace(',', '')
                                             val_num = float(val_clean_num)
                                             
-                                            # 2. จัดการฝั่งข้อมูลในตาราง (s_val):
                                             if col == 'ราคาทุนต่อหน่วย':
                                                 s_val_num = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                             else:
-                                                # ลบลูกน้ำออกจากข้อความสเปคก่อน (เช่น "12,000 BTU" -> "12000 BTU")
-                                                # แล้วค่อยใช้ Regex ดึงตัวเลข
                                                 s_val_str = df_search[col].astype(str).str.replace(',', '')
                                                 s_val_num = s_val_str.str.extract(r'(\d+\.?\d*)')[0].astype(float).fillna(0)
                                         except:
-                                            is_numeric_check = False # ถ้าแปลงไม่ผ่าน ให้กลับไปใช้ Text Search
+                                            is_numeric_check = False 
                                     
-                                    # ========================================================
-                                    # เริ่มเปรียบเทียบ
-                                    # ========================================================
+                                    # =================================================
+                                    # ⚖️ เริ่มเปรียบเทียบ & แยกตรรกะ AND/OR
+                                    # =================================================
+                                    sub_mask = None
+                                    
                                     if is_numeric_check:
-                                        # เทียบแบบตัวเลข (รองรับ 12,000 vs 9,000 ได้แล้ว)
+                                        # เทียบตัวเลข
                                         if op == 'gt': sub_mask = (s_val_num > val_num)
                                         elif op == 'gte': sub_mask = (s_val_num >= val_num)
                                         elif op == 'lt': sub_mask = (s_val_num < val_num)
                                         elif op == 'lte': sub_mask = (s_val_num <= val_num)
                                         elif op == 'equals': sub_mask = (s_val_num == val_num)
-                                        else: sub_mask = pd.Series([False] * len(df_search))
-                                        
                                     else:
-                                        # เทียบแบบข้อความ (Text)
+                                        # เทียบข้อความ
                                         s_val = df_search[col].astype(str)
                                         val = str(val)
                                         if val.endswith(".0"): val = val[:-2]
@@ -670,12 +671,25 @@ with tab2:
                                             val_clean = val.replace(" ", "").replace(",", "")
                                             sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
                                         elif op == 'equals': sub_mask = (s_val == val)
-                                        else: sub_mask = pd.Series([False] * len(df_search))
+
+                                    # 🔥 จุดตัดสินใจ: เอาผลลัพธ์ไปใส่ถังไหน?
+                                    if sub_mask is not None:
+                                        if op in ['gt', 'gte', 'lt', 'lte']:
+                                            range_mask &= sub_mask  # ใช้ AND สำหรับช่วง
+                                            has_range = True
+                                        else:
+                                            choice_mask |= sub_mask # ใช้ OR สำหรับทางเลือก
+                                            has_choice = True
                                     
-                                    col_mask |= sub_mask
                                     vals_log.append(f"{val}")
                             
-                            final_mask &= col_mask
+                            # รวมผลลัพธ์ของคอลัมน์นี้
+                            final_col_mask = pd.Series([True] * len(df_search))
+                            if has_range: final_col_mask &= range_mask
+                            if has_choice: final_col_mask &= choice_mask
+                            
+                            # เอาไปรวมกับผลลัพธ์รวม
+                            final_mask &= final_col_mask
                             active_conds.append(f"{col}: {'|'.join(vals_log)}")
                         
                         results = df_search[final_mask]
