@@ -266,7 +266,7 @@ if check_password():
                             {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={encoded_name}"},
                             {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={encoded_name}"},
                             {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={encoded_name}"},
-                            {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"}
+                            {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"},
                             {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={encoded_name}"},
                             {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={encoded_name}"},
                         ]
