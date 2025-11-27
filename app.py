@@ -221,26 +221,33 @@ def ask_gemini_extract(names):
     except: return []
 
 def ask_gemini_filter(query, columns):
-    # Prompt แบบประหยัด Token (สั้น กระชับ ตรงเป้า)
     prompt = f"""
-    Task: Convert "{query}" to JSON Filters. Cols: {columns}
-    Rules:
-    1. Split ranges/options into multiple values (e.g. "3-4L" -> "3", "4")
-    2. REMOVE UNITS from values (e.g. "4 Liters" -> "4")
-    3. Use 'contains' for text, 'gt'/'lt' for price.
+    Role: คุณคือ Search Engine อัจฉริยะ หน้าที่คือแปลงคำค้นหา "{query}" เป็น JSON Filter
+    Columns Available: {columns}
     
-    Response JSON:
+    Instruction (สำคัญมาก):
+    1. **Primary Filter**: ต้องระบุ 'AI_Type' หรือ 'AI_Brand' เสมอถ้ามีในคำค้น (เช่น "ตู้เย็น" -> AI_Type contains "ตู้เย็น")
+    2. **Range Handling**: ถ้าเจอช่วงตัวเลข (เช่น "6-10 คิว") ให้แตกเป็นเลขจำนวนเต็มทุกตัวในช่วงนั้น (เช่น 6, 7, 8, 9, 10)
+    3. **Unit Removal**: ตัดหน่วยทิ้งเสมอ (เอาแค่ตัวเลข)
+    4. **Price Logic (กฎเหล็ก)**: 
+       - ถ้าผู้ใช้แค่ถามว่า "ราคาเท่าไหร่", "ขอราคาทุน", "เช็คราคา" -> **ห้าม** สร้าง Filter 'ราคาทุนต่อหน่วย' เด็ดขาด! (ปล่อยให้เป็นหน้าที่ของการแสดงผล)
+       - ให้สร้าง Filter 'ราคาทุนต่อหน่วย' **เฉพาะเมื่อ** มีตัวเลขกำกับเท่านั้น (เช่น "ไม่เกิน 5000", "ถูกกว่า 2000")
+    
+    Output Format (JSON):
     {{
         "filters": [
-            {{ "column": "col_name", "operator": "contains/gt/lt", "value": "val" }}
+            {{ "column": "AI_Type", "operator": "contains", "value": "ตู้เย็น" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "7" }},
+            {{ "column": "AI_Spec", "operator": "contains", "value": "8" }}
         ]
     }}
     """
     try:
-        # ใช้ Flash model (ประหยัดสุด) + บังคับ JSON
         res = ai_model.generate_content(
-            prompt, 
-            generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
         )
         return json.loads(res.text.strip())
     except: return None
