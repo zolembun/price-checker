@@ -11,7 +11,7 @@ import re
 st.set_page_config(page_title="ระบบเช็คราคา & คู่แข่ง", page_icon="💰", layout="wide")
 
 # =========================================================
-# 🔐 ส่วนระบบ Login
+# 🔐 ส่วนระบบ Login (คงเดิม)
 # =========================================================
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -36,7 +36,7 @@ def check_password():
 
 if check_password():
     
-    # CSS ตกแต่ง: เน้นราคาทุนให้เด่น (ตัวหนังสือใหญ่ สีแดง)
+    # CSS ตกแต่ง: เน้นราคาทุนให้เด่น
     st.markdown("""
     <style>
         .cost-box { 
@@ -91,38 +91,27 @@ if check_password():
     @st.cache_data(ttl=600)
     def load_data(_sheets_service, _drive_service, spreadsheet_url):
         try:
-            # ดึง ID จาก URL
             spreadsheet_id = spreadsheet_url.split('/d/')[1].split('/')[0]
             
-            # ดึง Metadata (ชื่อไฟล์, เวลาอัปเดต)
             file_meta = _drive_service.files().get(fileId=spreadsheet_id, fields="name, modifiedTime").execute()
             file_name = file_meta.get('name')
             mod_time_str = file_meta.get('modifiedTime')
             dt = datetime.strptime(mod_time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
             last_update = dt.strftime("%d/%m/%Y %H:%M น.")
             
-            # ดึงข้อมูลจาก Sheet
             sheet = _sheets_service.spreadsheets()
             result = sheet.values().get(spreadsheetId=spreadsheet_id, range="A:H").execute()
             values = result.get('values', [])
             
             if not values: return None, None, None
             
-            # สร้าง DataFrame
             df = pd.DataFrame(values[1:], columns=values[0])
             
-            # แปลงราคาทุนเป็นตัวเลข (ลบ comma ออก)
-            if 'ราคาทุนต่อหน่วย' in df.columns:
-                df['ราคาทุนต่อหน่วย'] = pd.to_numeric(
-                    df['ราคาทุนต่อหน่วย'].astype(str).str.replace(',', ''), 
-                    errors='coerce'
-                ).fillna(0)
-                
-            if 'จำนวนสต้อก' in df.columns:
-                df['จำนวนสต้อก'] = pd.to_numeric(
-                    df['จำนวนสต้อก'].astype(str).str.replace(',', ''), 
-                    errors='coerce'
-                ).fillna(0)
+            # แปลงตัวเลข
+            cols_to_numeric = ['ราคาทุนต่อหน่วย', 'จำนวนสต้อก']
+            for col in cols_to_numeric:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
                 
             return df, file_name, last_update
             
@@ -130,15 +119,13 @@ if check_password():
             st.error(f"เกิดข้อผิดพลาดในการโหลดข้อมูล: {str(e)}")
             return None, None, None
 
-    # ฟังก์ชันทำความสะอาดข้อความ (หัวใจสำคัญของการค้นหาแบบไม่สนขีด)
+    # ฟังก์ชันช่วยทำความสะอาดข้อความ (สำหรับการค้นหาแบบประหยัด Token)
     def clean_text(text):
-        if not isinstance(text, str):
-            text = str(text)
-        # ลบทุกอย่างที่ไม่ใช่ตัวอักษรและตัวเลข แล้วแปลงเป็นตัวเล็ก
+        if not isinstance(text, str): text = str(text)
         return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
 
     # 3. ส่วนแสดงผลหลัก
-    st.title("🔎 เช็คราคาทุน (Smart Search)")
+    st.title("🔎 เช็คราคาทุน & คู่แข่ง")
 
     try:
         sheets_svc, drive_svc = init_services()
@@ -158,141 +145,92 @@ if check_password():
                 match_index = -1
                 found_by = ""
                 
-                # --- LOGIC การค้นหาแบบประหยัด Token ---
-                
-                # 1. แปลงคำค้นหาให้สะอาด (rt-20 -> rt20)
+                # --- LOGIC การค้นหาแบบประหยัด Token (Smart Search) ---
                 query_clean = clean_text(query)
-                
-                # 2. สร้างคอลัมน์ชั่วคราวใน Memory (สะอาดเหมือนกัน) เพื่อเทียบ
-                # (ใช้ apply เพื่อ clean ทีละแถว)
                 sku_clean_series = df['รหัสสินค้า'].astype(str).apply(clean_text)
                 desc_clean_series = df['รายละเอียดสินค้า'].astype(str).apply(clean_text)
                 
-                # --- ด่านที่ 1: ค้นหาใน "รหัสสินค้า" (Column A) ---
-                # เช็คว่า query_clean เป็นส่วนหนึ่งของ sku_clean หรือไม่
+                # ด่าน 1: ค้นหารหัสสินค้า (Exact match with clean text)
                 sku_matches = df[sku_clean_series.str.contains(query_clean, na=False)]
                 
                 if not sku_matches.empty:
-                    # ถ้าเจอในรหัสสินค้า เอาตัวแรกที่เจอเลย (แม่นยำสุด)
                     match_index = sku_matches.index[0]
-                    found_by = "⚡ เจอรหัสสินค้า (Column A)"
-                
+                    found_by = "⚡ เจอรหัสสินค้า"
                 else:
-                    # --- ด่านที่ 2: ค้นหาใน "รายละเอียดสินค้า" (Column B) ---
-                    # เช็คในรายละเอียดสินค้าด้วย logic เดียวกัน
+                    # ด่าน 2: ค้นหารายละเอียด
                     desc_matches = df[desc_clean_series.str.contains(query_clean, na=False)]
-                    
                     if not desc_matches.empty:
-                        # ถ้าเจอ ให้เลือกตัวที่มีรหัสสั้นที่สุด (มักจะเป็นตัวแม่) หรือตัวแรก
                         match_index = desc_matches.index[0]
-                        found_by = "🔎 เจอในรายละเอียด (Column B)"
-                        
+                        found_by = "🔎 เจอในรายละเอียด"
                     else:
-                        # --- ด่านที่ 3: ใช้ AI (ถ้าหาไม่เจอจริงๆ) ---
-                        # ส่งข้อมูลไปให้ AI แค่บางส่วน (Candidates) เพื่อประหยัด Token
-                        
-                        # กรองสินค้าที่มี "บางส่วน" ของคำค้นหา เพื่อไม่ให้ส่งไปทั้ง 1000 รายการ
-                        # เช่น ค้น "rt20" อย่างน้อยต้องมี "r" หรือ "t" หรือ "2"
-                        keywords = list(filter(None, re.split(r'[^a-zA-Z0-9]', query))) # แยกคำ
+                        # ด่าน 3: AI Fallback (ส่งไปน้อยๆ ประหยัด Token)
+                        keywords = list(filter(None, re.split(r'[^a-zA-Z0-9]', query)))
                         if not keywords: keywords = [query]
-                        
-                        # กรองแบบหยาบๆ ด้วย Python ก่อน
                         candidates = df[df.astype(str).apply(lambda x: any(k.lower() in x.lower() for k in keywords), axis=1)]
                         
-                        # จำกัดจำนวนที่จะส่งให้ AI (Max 30 ตัว) -> ประหยัด Token ชัวร์
-                        if candidates.empty:
-                             search_pool = df.sample(min(len(df), 15)) # สุ่มมานิดหน่อยเผื่อ AI เดาได้
-                        else:
-                             search_pool = candidates.head(30)
+                        if candidates.empty: search_pool = df.sample(min(len(df), 15))
+                        else: search_pool = candidates.head(30)
                         
                         product_list_str = search_pool[['รหัสสินค้า', 'รายละเอียดสินค้า']].to_string(index=True)
-                        
                         model = genai.GenerativeModel('gemini-1.5-flash')
-                        prompt = f"""
-                        คำค้นหา: "{query}"
+                        prompt = f"คำค้นหา: '{query}'\nหา Index สินค้าที่ตรงที่สุดจาก:\n{product_list_str}\nตอบแค่ตัวเลข Index. ถ้าไม่มีตอบ -1"
                         
-                        จากรายการสินค้าด้านล่างนี้ ตัวไหนคือสินค้าที่ลูกค้าต้องการมากที่สุด?
-                        (ดูทั้งรหัสและชื่อรุ่น พยายามจับคู่แม้ตัวสะกดจะผิดเพี้ยนเล็กน้อย)
-                        
-                        รายการสินค้า:
-                        {product_list_str}
-                        
-                        ตอบกลับเฉพาะตัวเลข Index (ด้านซ้ายสุด) ของรายการที่ถูกที่สุดเพียงตัวเดียว
-                        ถ้ามั่นใจว่าไม่มีเลย ให้ตอบ -1
-                        """
-                        
-                        with st.spinner('ไม่เจอตรงๆ... กำลังให้ AI ช่วยแกะลายแทง...'):
+                        with st.spinner('กำลังให้ AI ช่วยแกะรหัส...'):
                             try:
                                 response = model.generate_content(prompt)
                                 match_index = int(response.text.strip())
-                                found_by = "🤖 AI ค้นพบ (Advanced Match)"
+                                found_by = "🤖 AI ค้นพบ"
                             except:
                                 match_index = -1
 
                 # -----------------------------------------------------------
-                # ส่วนแสดงผล (เน้นราคาทุน)
+                # แสดงผล (ปรับปรุงตาม Requirement)
                 # -----------------------------------------------------------
                 if match_index != -1 and match_index in df.index:
                     item = df.loc[match_index]
-                    
-                    # ดึงข้อมูล
                     cost_price = item.get('ราคาทุนต่อหน่วย', 0)
                     stock = item.get('จำนวนสต้อก', 0)
                     model_id = item.get('รหัสสินค้า', '-')
                     product_name = item.get('รายละเอียดสินค้า', '-')
                     brand = item.get('ยี่ห้อ', '-')
 
-                    # Header ชื่อสินค้า
                     st.success(f"{found_by}: {product_name}")
                     
-                    # Layout 3 คอลัมน์ (ทุน - ขาย - ข้อมูล)
-                    c1, c2, c3 = st.columns([1.3, 1.3, 1])
-                    
-                    # คำนวณราคาขาย (สมมติ 15%)
-                    target_margin = 15
+                    # 1. ราคาแนะนำ (12% ตามที่ขอ)
+                    target_margin = 12
                     selling_price = cost_price * (1 + (target_margin/100))
                     profit = selling_price - cost_price
 
+                    c1, c2, c3 = st.columns([1.3, 1.3, 1])
                     with c1:
                         st.markdown(f"""
                         <div class="cost-box">
                             <div class="price-label">🔴 ราคาทุน (COST)</div>
                             <div class="price-value-cost">{cost_price:,.0f}</div>
-                            <div style="color: #b71c1c; font-size: 0.8em; margin-top:5px;">(ความลับร้านค้า)</div>
                         </div>
                         """, unsafe_allow_html=True)
-                        
                     with c2:
                         st.markdown(f"""
                         <div class="selling-box">
                             <div class="price-label">🟢 ราคาขายแนะนำ (+{target_margin}%)</div>
                             <div class="price-value-sell">{selling_price:,.0f}</div>
-                            <div style="color: #1b5e20; font-size: 0.9em; font-weight:bold; margin-top:5px;">กำไร {profit:,.0f} บาท</div>
+                            <div style="color: #1b5e20; font-weight:bold;">กำไร {profit:,.0f} บาท</div>
                         </div>
                         """, unsafe_allow_html=True)
-
                     with c3:
                         st.markdown(f"""
                         <div class="info-box">
-                            <div style="margin-bottom:8px;"><b>🆔 รหัส:</b> <span class="search-badge">{model_id}</span></div>
-                            <div style="margin-bottom:8px;"><b>📦 สต้อก:</b> {stock} ชิ้น</div>
-                            <div style="margin-bottom:8px;"><b>🏷️ ยี่ห้อ:</b> {brand}</div>
+                            <b>🆔 รหัส:</b> {model_id}<br>
+                            <b>📦 สต้อก:</b> {stock} ชิ้น<br>
+                            <b>🏷️ ยี่ห้อ:</b> {brand}
                         </div>
                         """, unsafe_allow_html=True)
-                        
-                        # ปุ่มกดค้นหา Google
-                        clean_keyword = re.sub(r'[^a-zA-Z0-9 ]', '', str(model_id))
-                        st.link_button(
-                            "🔍 เช็ค Google", 
-                            f"https://www.google.com/search?q={clean_keyword}",
-                            use_container_width=True
-                        )
 
                     st.divider()
                     
-                    # ตาราง Margin (ซ่อนไว้ใน Expander จะได้ไม่รก)
-                    with st.expander("ดูตารางราคา Margin อื่นๆ (5% - 30%)"):
-                        margins = [5, 10, 15, 20, 25, 30]
+                    # 2. ตาราง Margin (ตามสเต็ปที่ขอ: 3, 5, 8, 10, 12, 15, 18, 25, 30)
+                    with st.expander("ดูตารางราคาขายอื่นๆ (3% - 30%)", expanded=True):
+                        margins = [3, 5, 8, 10, 12, 15, 18, 25, 30]
                         price_data = []
                         for m in margins:
                             sp = cost_price * (1 + (m/100))
@@ -303,27 +241,42 @@ if check_password():
                             })
                         st.dataframe(pd.DataFrame(price_data), hide_index=True, use_container_width=True)
 
-                    # ลิงก์เช็คราคาคู่แข่ง
-                    st.subheader("🛒 เช็คราคาตลาด")
+                    # 3. Hot Search (Logic เดิมของคุณเป๊ะๆ)
+                    st.divider()
+                    st.subheader("🛒 เช็คราคาคู่แข่ง (Hot Search)")
+
+                    # ตัดภาษาไทยออก เอาเฉพาะรหัส/อังกฤษ
+                    default_search_code = re.sub(r'[\u0E00-\u0E7F]', '', str(model_id)).strip('-').strip()
                     
-                    search_query = st.text_input("คีย์เวิร์ดสำหรับค้นหา:", value=clean_keyword)
-                    if search_query:
-                        enc = urllib.parse.quote(search_query)
-                        cols = st.columns(5)
+                    # ช่องให้แก้ไขคำค้นหา
+                    final_search_keyword = st.text_input("🎯 คำค้นหาสำหรับเช็คราคา (แก้ไขได้):", value=default_search_code)
+                    
+                    if final_search_keyword:
+                        encoded_name = urllib.parse.quote(final_search_keyword.strip())
+                        
+                        # รายชื่อร้านเดิมของคุณ
                         stores = [
-                            ("Shopee", f"https://shopee.co.th/search?keyword={enc}"),
-                            ("Lazada", f"https://www.lazada.co.th/catalog/?q={enc}"),
-                            ("NocNoc", f"https://nocnoc.com/search?q={enc}"),
-                            ("PowerBuy", f"https://www.powerbuy.co.th/th/search/{enc}"),
-                            ("HomePro", f"https://www.homepro.co.th/search?q={enc}")
+                            {"name": "HomePro", "url": f"https://www.homepro.co.th/search?q={encoded_name}"},
+                            {"name": "PowerBuy", "url": f"https://www.powerbuy.co.th/th/search/{encoded_name}"},
+                            {"name": "ThaiWatsadu", "url": f"https://www.thaiwatsadu.com/th/search/{encoded_name}"},
+                            {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={encoded_name}"},
+                            {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={encoded_name}"},
+                            {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={encoded_name}"},
+                            {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"}
                         ]
-                        for idx, (name, url) in enumerate(stores):
-                            cols[idx].link_button(name, url, use_container_width=True)
+                        
+                        # สร้างปุ่ม
+                        cols = st.columns(4) # แบ่ง 4 คอลัมน์ให้ดูสวย
+                        for i, store in enumerate(stores):
+                            with cols[i % 4]:
+                                st.link_button(f"🔍 {store['name']}", store['url'], use_container_width=True)
+                    else:
+                        st.info("กรุณาพิมพ์คำค้นหาเพื่อสร้างปุ่มเช็คราคา")
 
                 else:
                     if query:
                         st.warning(f"❌ ไม่พบสินค้า: '{query}'")
-                        st.info("💡 คำแนะนำ: ลองพิมพ์ชื่อยี่ห้อ หรือรหัสรุ่นแค่บางส่วน (เช่น พิมพ์แค่ตัวเลข)")
+                        st.info("💡 ลองพิมพ์แค่ตัวเลขรุ่น หรือชื่อยี่ห้อบางส่วน")
 
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาด: {str(e)}")
