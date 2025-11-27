@@ -456,7 +456,7 @@ with tab1:
             st.divider()
             st.subheader("🛒 เช็คราคาคู่แข่ง (Hot Search)")
             default_search = re.sub(r'[\u0E00-\u0E7F]', '', str(mid)).strip('-').strip()
-            final_kw = st.text_input("🎯 คำค้นหา:", value=default_search, key="hot_kw")
+            final_kw = st.text_input("🎯 คำค้นหา:", value=default_search, key=f"hot_kw_{match_index}")
             
             if final_kw:
                 enc = urllib.parse.quote(final_kw.strip())
