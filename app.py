@@ -585,6 +585,9 @@ with tab2:
     # -------------------------------------------------------------
     # ส่วนค้นหา AI (ฉบับ Final Fix: แก้ตรรกะช่วงตัวเลข AND/OR)
     # -------------------------------------------------------------
+    # -------------------------------------------------------------
+    # ส่วนค้นหา AI (ฉบับแก้ "หาพี่ใหญ่": ดึงเลขสเปคที่ถูกต้องแม้มีเลขอื่นปน)
+    # -------------------------------------------------------------
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
@@ -610,12 +613,8 @@ with tab2:
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
-                            # 🔥 Logic ใหม่: แยกตัวแปรสำหรับเก็บผลลัพธ์ 2 แบบ
-                            # 1. range_mask (สำหรับ > < >= <=) -> เริ่มต้น True แล้วใช้ AND (&) ตัดออก
                             range_mask = pd.Series([True] * len(df_search))
                             has_range = False
-                            
-                            # 2. choice_mask (สำหรับ contains, equals) -> เริ่มต้น False แล้วใช้ OR (|) เพิ่มเข้า
                             choice_mask = pd.Series([False] * len(df_search))
                             has_choice = False
 
@@ -627,9 +626,6 @@ with tab2:
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
-                                    # =================================================
-                                    # 🔢 โซนจัดการตัวเลข (Numeric Handling)
-                                    # =================================================
                                     is_numeric_check = False
                                     s_val_num = None
                                     val_num = None
@@ -643,25 +639,32 @@ with tab2:
                                             if col == 'ราคาทุนต่อหน่วย':
                                                 s_val_num = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
                                             else:
-                                                s_val_str = df_search[col].astype(str).str.replace(',', '')
-                                                s_val_num = s_val_str.str.extract(r'(\d+\.?\d*)')[0].astype(float).fillna(0)
+                                                # 🔥 [สูตรหาพี่ใหญ่] ดึงตัวเลขทุกตัวออกมา แล้วเลือกตัวที่มากที่สุด
+                                                # วิธีนี้จะแก้ปัญหา R32, รุ่น AR10 ที่มากวนใจได้
+                                                def get_max_number(text):
+                                                    try:
+                                                        clean_text = str(text).replace(',', '') # ลบลูกน้ำ
+                                                        # หาตัวเลขทั้งหมดในข้อความ (รวมทศนิยม)
+                                                        nums = re.findall(r'(\d+\.?\d*)', clean_text)
+                                                        if not nums: return 0.0
+                                                        # แปลงเป็นตัวเลขแล้วหาค่ามากที่สุด
+                                                        floats = [float(n) for n in nums if n and n != '.']
+                                                        return max(floats) if floats else 0.0
+                                                    except: return 0.0
+
+                                                # ใช้ apply เพื่อประมวลผลทีละแถว (ชัวร์กว่า)
+                                                s_val_num = df_search[col].apply(get_max_number)
                                         except:
                                             is_numeric_check = False 
                                     
-                                    # =================================================
-                                    # ⚖️ เริ่มเปรียบเทียบ & แยกตรรกะ AND/OR
-                                    # =================================================
                                     sub_mask = None
-                                    
                                     if is_numeric_check:
-                                        # เทียบตัวเลข
                                         if op == 'gt': sub_mask = (s_val_num > val_num)
                                         elif op == 'gte': sub_mask = (s_val_num >= val_num)
                                         elif op == 'lt': sub_mask = (s_val_num < val_num)
                                         elif op == 'lte': sub_mask = (s_val_num <= val_num)
                                         elif op == 'equals': sub_mask = (s_val_num == val_num)
                                     else:
-                                        # เทียบข้อความ
                                         s_val = df_search[col].astype(str)
                                         val = str(val)
                                         if val.endswith(".0"): val = val[:-2]
@@ -672,23 +675,20 @@ with tab2:
                                             sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
                                         elif op == 'equals': sub_mask = (s_val == val)
 
-                                    # 🔥 จุดตัดสินใจ: เอาผลลัพธ์ไปใส่ถังไหน?
                                     if sub_mask is not None:
                                         if op in ['gt', 'gte', 'lt', 'lte']:
-                                            range_mask &= sub_mask  # ใช้ AND สำหรับช่วง
+                                            range_mask &= sub_mask
                                             has_range = True
                                         else:
-                                            choice_mask |= sub_mask # ใช้ OR สำหรับทางเลือก
+                                            choice_mask |= sub_mask
                                             has_choice = True
                                     
                                     vals_log.append(f"{val}")
                             
-                            # รวมผลลัพธ์ของคอลัมน์นี้
                             final_col_mask = pd.Series([True] * len(df_search))
                             if has_range: final_col_mask &= range_mask
                             if has_choice: final_col_mask &= choice_mask
                             
-                            # เอาไปรวมกับผลลัพธ์รวม
                             final_mask &= final_col_mask
                             active_conds.append(f"{col}: {'|'.join(vals_log)}")
                         
@@ -711,6 +711,24 @@ with tab2:
                         else: 
                             st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {'; '.join(active_conds)})")
                             
+                            # 🔥 [Debug พิเศษ] ช่วยเช็คว่าระบบอ่านค่าตัวเลขได้เท่าไหร่
+                            if 'AI_Spec' in df_search.columns:
+                                st.write("---")
+                                st.info("🔍 ตรวจสอบค่าสเปคที่ระบบอ่านได้ (Sample):")
+                                
+                                # ฟังก์ชันจำลองเพื่อโชว์ให้ user ดู
+                                def preview_extract(text):
+                                    try:
+                                        clean_text = str(text).replace(',', '')
+                                        nums = re.findall(r'(\d+\.?\d*)', clean_text)
+                                        floats = [float(n) for n in nums if n and n != '.']
+                                        return max(floats) if floats else 0.0
+                                    except: return 0.0
+
+                                sample_df = df_search[['รายละเอียดสินค้า', 'AI_Spec']].head(5).copy()
+                                sample_df['ค่าที่อ่านได้ (Max Number)'] = sample_df['AI_Spec'].apply(preview_extract)
+                                st.dataframe(sample_df)
+
                     except Exception as e: st.error(f"Error: {e}")
                 else:
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
