@@ -96,10 +96,10 @@ def init_services():
         
         # 🔥 แก้ไขจุดที่ Error: เปลี่ยนชื่อโมเดลเป็นรุ่น Latest
         try:
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            model = genai.GenerativeModel('gemini-2.0-flash-lite-preview-02-05')
         except:
             # Fallback ถ้า latest ใช้ไม่ได้ ให้ลองตัวธรรมดาหรือ Pro
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            model = genai.GenerativeModel('gemini-2.0-flash-lite-preview-02-05')
         
         return sheets_service, drive_service, model
     except Exception as e:
@@ -503,7 +503,7 @@ with tab2:
                         columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
                     ).to_dict('records')
 
-                    BATCH = 10
+                    BATCH = 30
                     res_save = []
                     total_batches = (len(to_proc) // BATCH) + 1
                     
