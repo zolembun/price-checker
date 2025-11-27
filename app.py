@@ -407,7 +407,8 @@ with tab1:
             else:
                 keywords = list(filter(None, re.split(r'[^a-zA-Z0-9]', query1)))
                 if not keywords: keywords = [query1]
-                candidates = df_main[df_main.astype(str).apply(lambda x: any(k.lower() in x.lower() for k in keywords), axis=1)]
+                # แก้เป็นบรรทัดนี้ครับ
+                candidates = df_main[df_main.astype(str).apply(lambda x: any(k.lower() in ' '.join(x).lower() for k in keywords), axis=1)]
                 
                 if candidates.empty: search_pool = df_main.sample(min(len(df_main), 15))
                 else: search_pool = candidates.head(30)
