@@ -407,7 +407,7 @@ with tab2:
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
    # วางต่อจากบรรทัด: query2 = col_q1.text_input(...)
-   if col_q2.button("ค้นหา AI", type="primary"):
+if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย']
