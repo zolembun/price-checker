@@ -190,31 +190,20 @@ def clean_text(text):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (Force JSON + Debug)
 # ---------------------------------------------------------
+# วางทับฟังก์ชัน def ask_gemini_extract(names): เดิม
 def ask_gemini_extract(names):
     prompt = f"""
-    Analyze the following list of product names and extract attributes.
-    Input List: {json.dumps(names, ensure_ascii=False)}
-    
-    Return ONLY a JSON Array of objects. Each object must correspond to the input list index.
-    Fields required: "AI_Brand", "AI_Type", "AI_Spec", "AI_Tags".
-    
-    Example Output:
-    [
-        {{"AI_Brand": "Samsung", "AI_Type": "TV", "AI_Spec": "55 Inch", "AI_Tags": "Smart TV, 4K"}},
-        {{"AI_Brand": "Unknown", "AI_Type": "Other", "AI_Spec": "-", "AI_Tags": ""}}
-    ]
+    Analyze product names. Return ONLY JSON Array.
+    Input: {json.dumps(names, ensure_ascii=False)}
+    Example: [{{"AI_Brand": "Samsung", "AI_Type": "TV", "AI_Spec": "55 Inch", "AI_Tags": "4K"}}]
+    If unknown, use "Unknown" or "-".
     """
-    
     try:
         response = ai_model.generate_content(
             prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
+            generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
         )
-        
-        text = response.text.strip()
-        data = json.loads(text)
+        data = json.loads(response.text.strip())
         
         normalized_data = []
         for item in data:
@@ -226,14 +215,10 @@ def ask_gemini_extract(names):
             }
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
-                
             normalized_data.append(new_item)
             
         return normalized_data
-
-    except Exception as e:
-        st.sidebar.error(f"AI Error: {e}")
-        return []
+    except: return []
 
 def ask_gemini_filter(query, columns):
     # Prompt แบบประหยัด Token (สั้น กระชับ ตรงเป้า)
@@ -418,61 +403,49 @@ with tab2:
     
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
-   if col_q2.button("ค้นหา AI", type="primary"):
+   # วางต่อจากบรรทัด: query2 = col_q1.text_input(...)
+    if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย']
                 filters = ask_gemini_filter(query2, cols_ai)
                 
                 if filters and 'filters' in filters:
-                    # 1. เริ่มต้น: สมมติว่าเอาทุกแถวไว้ก่อน
-                    final_mask = pd.Series([True] * len(df_search))
+                    mask = pd.Series([True] * len(df_search))
                     active_conds = []
-                    
-                    # 2. จัดกลุ่ม Filter ตามคอลัมน์ (Group by Column)
-                    from collections import defaultdict
-                    grouped_filters = defaultdict(list)
-                    for f in filters['filters']:
-                        grouped_filters[f['column']].append(f)
-                    
                     try:
-                        # 3. วนลูปทีละคอลัมน์ (Logic AND ระหว่างคอลัมน์)
+                        # 1. จัดกลุ่ม Filter ตามคอลัมน์
+                        from collections import defaultdict
+                        grouped_filters = defaultdict(list)
+                        for f in filters['filters']:
+                            grouped_filters[f['column']].append(f)
+
+                        # 2. วนลูปทีละคอลัมน์
                         for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
                             
-                            # สร้าง Mask ว่างๆ สำหรับคอลัมน์นี้ (เพื่อรอสะสมด้วย OR)
                             col_mask = pd.Series([False] * len(df_search))
                             vals_log = []
                             
-                            # 4. วนลูปเงื่อนไขภายในคอลัมน์เดียวกัน (Logic OR)
                             for f in conditions:
                                 op, val = f['operator'], f['value']
                                 
-                                # แปลงประเภทข้อมูลให้ตรงกัน
-                                if col == 'ราคาทุนต่อหน่วย':
-                                    s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
-                                    val = float(val)
-                                else:
-                                    s_val = df_search[col].astype(str)
-                                    val = str(val)
+                                s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0) if col == 'ราคาทุนต่อหน่วย' else df_search[col].astype(str)
+                                val = float(val) if col == 'ราคาทุนต่อหน่วย' else str(val)
                                 
-                                # ตรวจสอบเงื่อนไข
                                 if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
                                 elif op == 'equals': sub_mask = (s_val == val)
                                 elif op == 'gt': sub_mask = (s_val > val)
                                 elif op == 'lt': sub_mask = (s_val < val)
                                 else: sub_mask = pd.Series([False] * len(df_search))
                                 
-                                # รวมพลังด้วย OR (เจออันไหนก็เอา)
-                                col_mask |= sub_mask
+                                col_mask |= sub_mask # ใช้ OR ภายในคอลัมน์เดียวกัน
                                 vals_log.append(f"{val}")
                             
-                            # เอาผลสรุปของคอลัมน์นี้ ไป AND กับผลรวมใหญ่
-                            final_mask &= col_mask
+                            mask &= col_mask # ใช้ AND ระหว่างคอลัมน์
                             active_conds.append(f"{col}: {' | '.join(vals_log)}")
                         
-                        # 5. แสดงผลลัพธ์
-                        results = df_search[final_mask]
+                        results = df_search[mask]
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
                             st.dataframe(
@@ -483,11 +456,8 @@ with tab2:
                                 },
                                 use_container_width=True, hide_index=True
                             )
-                        else: 
-                            st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
-                            
-                    except Exception as e: st.error(f"Error: {e}")
+                        else: st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
+                    except Exception as e: st.error(f"เกิดข้อผิดพลาด: {e}")
                 else:
-                    # Fallback (ค้นหาแบบบ้านๆ ถ้า AI งง)
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
