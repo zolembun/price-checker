@@ -184,46 +184,60 @@ def clean_text(text):
     return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
 
 def ask_gemini_extract(names):
+    # 1. ปรับ Prompt ให้ชัดเจนขึ้นอีก
     prompt = f"""
-    คุณคือ AI สกัดข้อมูลสินค้า. นี่คือรายชื่อสินค้า:
-    {json.dumps(names, ensure_ascii=False)}
+    Role: คุณคือผู้เชี่ยวชาญสินค้า หน้าที่คือสกัดข้อมูลจากชื่อสินค้า
+    Input: {json.dumps(names, ensure_ascii=False)}
     
-    จงวิเคราะห์สินค้าแต่ละตัว และตอบกลับเป็น JSON Array โดยมีจำนวน item เท่ากับรายชื่อที่ให้ไปเป๊ะๆ ({len(names)} items)
+    Instruction:
+    - วิเคราะห์ชื่อสินค้าทีละรายการ
+    - สกัดข้อมูลออกมาเป็น JSON Array
+    - ถ้าไม่รู้ข้อมูล ให้ระบุว่า "Unknown" หรือ "-"
     
-    Format:
+    Output Format (JSON Array Only):
     [
       {{
-        "AI_Brand": "ยี่ห้อ (เช่น Samsung, Unknown)",
-        "AI_Type": "ประเภท (เช่น ทีวี, ตู้เย็น)",
-        "AI_Spec": "สเปคเด่น (เช่น 55นิ้ว)",
-        "AI_Tags": "คำค้นหา (เช่น จอแบน, 4K)"
+        "AI_Brand": "ยี่ห้อ (เช่น Samsung, Toshiba, Unknown)",
+        "AI_Type": "ประเภทสินค้า (เช่น ตู้เย็น, ทีวี, กระทะ)",
+        "AI_Spec": "สเปค (เช่น 12คิว, 55นิ้ว, 1.8ลิตร)",
+        "AI_Tags": "คำค้นหา (เช่น ประหยัดไฟ, 2ประตู, 4K)"
       }}
     ]
-    
-    ตอบเฉพาะ JSON Array เท่านั้น ไม่ต้องเกริ่นนำ
     """
     try:
         response = ai_model.generate_content(prompt)
         text = response.text.strip()
         
-        # 1. ล้าง Markdown (```json ... ```)
-        if text.startswith("```json"): text = text[7:]
-        if text.startswith("```"): text = text[3:]
-        if text.endswith("```"): text = text[:-3]
-        text = text.strip()
+        # 2. ทำความสะอาดข้อความ (Clean Markdown)
+        text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'```$', '', text, flags=re.MULTILINE)
         
-        # 2. ค้นหาจุดเริ่มต้น [ และสิ้นสุด ] (เพื่อตัดคำพูดเวิ่นเว้อของ AI ออก)
-        start_idx = text.find('[')
-        end_idx = text.rfind(']') + 1
-        
-        if start_idx != -1 and end_idx != -1:
-            json_str = text[start_idx:end_idx]
-            return json.loads(json_str)
-        else:
-            return []
+        # 3. ค้นหา JSON Array [...] ด้วย Regex (แม่นยำกว่า find)
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            data = json.loads(json_str)
+            
+            # 4. (สำคัญ) แปลง Key ให้ตรงกับที่เราต้องการ (Normalize Keys)
+            # กันเหนียวกรณี AI ส่งมาเป็น "Brand" แทนที่จะเป็น "AI_Brand"
+            normalized_data = []
+            for item in data:
+                new_item = {
+                    "AI_Brand": item.get("AI_Brand") or item.get("Brand") or item.get("ยี่ห้อ") or "Unknown",
+                    "AI_Type": item.get("AI_Type") or item.get("Type") or item.get("ประเภท") or "Other",
+                    "AI_Spec": item.get("AI_Spec") or item.get("Spec") or item.get("สเปค") or "-",
+                    "AI_Tags": item.get("AI_Tags") or item.get("Tags") or item.get("Tag") or ""
+                }
+                normalized_data.append(new_item)
+            
+            return normalized_data
+            
+        return []
             
     except Exception as e:
-        print(f"JSON Parse Error: {e}") # (ดูใน Log เซิฟเวอร์ได้ถ้าอยากรู้ error)
+        # พิมพ์ error ลง log เพื่อให้เราเห็นปัญหา (ถ้ามี)
+        print(f"AI Error: {e}") 
         return []
 
 def ask_gemini_filter(query, cols):
