@@ -183,61 +183,63 @@ def clean_text(text):
     if not isinstance(text, str): text = str(text)
     return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
 
+# ---------------------------------------------------------
+# 🧠 ฟังก์ชัน AI (เวอร์ชั่น Force JSON + Debug)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
-    # 1. ปรับ Prompt ให้ชัดเจนขึ้นอีก
+    # 1. สร้าง Prompt แบบชัดเจนพร้อมตัวอย่าง
     prompt = f"""
-    Role: คุณคือผู้เชี่ยวชาญสินค้า หน้าที่คือสกัดข้อมูลจากชื่อสินค้า
-    Input: {json.dumps(names, ensure_ascii=False)}
+    Analyze the following list of product names and extract attributes.
+    Input List: {json.dumps(names, ensure_ascii=False)}
     
-    Instruction:
-    - วิเคราะห์ชื่อสินค้าทีละรายการ
-    - สกัดข้อมูลออกมาเป็น JSON Array
-    - ถ้าไม่รู้ข้อมูล ให้ระบุว่า "Unknown" หรือ "-"
+    Return ONLY a JSON Array of objects. Each object must correspond to the input list index.
+    Fields required: "AI_Brand", "AI_Type", "AI_Spec", "AI_Tags".
     
-    Output Format (JSON Array Only):
+    Example Output:
     [
-      {{
-        "AI_Brand": "ยี่ห้อ (เช่น Samsung, Toshiba, Unknown)",
-        "AI_Type": "ประเภทสินค้า (เช่น ตู้เย็น, ทีวี, กระทะ)",
-        "AI_Spec": "สเปค (เช่น 12คิว, 55นิ้ว, 1.8ลิตร)",
-        "AI_Tags": "คำค้นหา (เช่น ประหยัดไฟ, 2ประตู, 4K)"
-      }}
+        {{"AI_Brand": "Samsung", "AI_Type": "TV", "AI_Spec": "55 Inch", "AI_Tags": "Smart TV, 4K"}},
+        {{"AI_Brand": "Unknown", "AI_Type": "Other", "AI_Spec": "-", "AI_Tags": ""}}
     ]
     """
+    
     try:
-        response = ai_model.generate_content(prompt)
+        # 2. ใช้ Generation Config บังคับ JSON (สำคัญมาก!)
+        response = ai_model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
+        
         text = response.text.strip()
         
-        # 2. ทำความสะอาดข้อความ (Clean Markdown)
-        text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
-        text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
-        text = re.sub(r'```$', '', text, flags=re.MULTILINE)
+        # --- [ส่วน Debug: แสดงสิ่งที่ AI ตอบมาให้เห็นบนหน้าจอ] ---
+        # (ถ้า AI ตอบมาแปลกๆ เราจะเห็นตรงนี้)
+        # st.sidebar.text_area("Raw AI Response", text, height=100) 
+        # -------------------------------------------------------
+
+        data = json.loads(text)
         
-        # 3. ค้นหา JSON Array [...] ด้วย Regex (แม่นยำกว่า find)
-        match = re.search(r'\[.*\]', text, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            data = json.loads(json_str)
+        # 3. ตรวจสอบและ Normalize ข้อมูล
+        normalized_data = []
+        for item in data:
+            # พยายามดึงข้อมูลจาก Key ต่างๆ ที่เป็นไปได้
+            new_item = {
+                "AI_Brand": item.get("AI_Brand") or item.get("Brand") or "Unknown",
+                "AI_Type": item.get("AI_Type") or item.get("Type") or "Other",
+                "AI_Spec": item.get("AI_Spec") or item.get("Spec") or "-",
+                "AI_Tags": item.get("AI_Tags") or item.get("Tags") or ""
+            }
+            # แปลง List เป็น String (กรณี AI เผลอตอบ Tags เป็น List)
+            if isinstance(new_item["AI_Tags"], list):
+                new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
+                
+            normalized_data.append(new_item)
             
-            # 4. (สำคัญ) แปลง Key ให้ตรงกับที่เราต้องการ (Normalize Keys)
-            # กันเหนียวกรณี AI ส่งมาเป็น "Brand" แทนที่จะเป็น "AI_Brand"
-            normalized_data = []
-            for item in data:
-                new_item = {
-                    "AI_Brand": item.get("AI_Brand") or item.get("Brand") or item.get("ยี่ห้อ") or "Unknown",
-                    "AI_Type": item.get("AI_Type") or item.get("Type") or item.get("ประเภท") or "Other",
-                    "AI_Spec": item.get("AI_Spec") or item.get("Spec") or item.get("สเปค") or "-",
-                    "AI_Tags": item.get("AI_Tags") or item.get("Tags") or item.get("Tag") or ""
-                }
-                normalized_data.append(new_item)
-            
-            return normalized_data
-            
-        return []
-            
+        return normalized_data
+
     except Exception as e:
-        # พิมพ์ error ลง log เพื่อให้เราเห็นปัญหา (ถ้ามี)
-        print(f"AI Error: {e}") 
+        st.sidebar.error(f"AI Error: {e}")
         return []
 
 def ask_gemini_filter(query, cols):
