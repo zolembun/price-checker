@@ -302,45 +302,33 @@ def ask_gemini_extract(names):
         print(f"AI Error: {e}")
         return []
 def ask_gemini_filter(query, columns):
-    # ปรับ Prompt ให้ฉลาดขึ้น รู้จักแยก "ชนิด" (1 ประตู) ออกจาก "ประเภท" (ตู้เย็น)
+    # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
     prompt = f"""
     Role: คุณคือ Search Engine อัจฉริยะ แปลงคำค้นหา "{query}" เป็น JSON Filter
     Columns: {columns}
     
     Instruction (Strict Rules):
-    1. **Category vs Kind Strategy (สำคัญมาก!)**:
-       - ให้แยกแยะ "ประเภทหลัก" (AI_Type) กับ "ลักษณะย่อย/ชนิด" (AI_Kind)
-       - ถ้า User พิมพ์ "ตู้เย็น" เฉยๆ -> กรองแค่ AI_Type="ตู้เย็น"
-       - ถ้า User พิมพ์ "ตู้เย็น 1 ประตู" -> ต้องกรองทั้ง AI_Type="ตู้เย็น" **และ** AI_Kind="1 ประตู"
-       - ตัวอย่าง: "เครื่องซักผ้า ฝาบน" -> AI_Type="เครื่องซักผ้า", AI_Kind="ฝาบน"
-       - ตัวอย่าง: "แอร์ Inverter" -> AI_Type="แอร์", AI_Kind="Inverter"
+    1. **Category/Kind**: แยก AI_Type (ประเภท) กับ AI_Kind (ชนิด) ให้ชัดเจน
+    2. **Price Logic**: ถ้ามีตัวเลขราคา ให้ใช้ lte (ไม่เกิน), gte (ตั้งแต่)
     
-    2. **Decimal Range Strategy**: 
-       - หากเจอช่วงที่มีทศนิยม (เช่น "5.2 - 7.3 คิว") 
-       - **ให้แปลงเป็นเลขจำนวนเต็ม (Integer) ทุกตัวที่ครอบคลุมช่วงนั้น**
-       - ตัวอย่าง: "5.2 - 7.3" -> value: ["5", "6", "7"] 
+    3. **Decimal Range Strategy (Spec Only)**: 
+       - ถ้า User ระบุช่วงขนาด/สเปค (เช่น "5.5 - 6 คิว", "9000-12000 btu") 
+       - **ให้ใช้ operator 'gte' (>=) และ 'lte' (<=) กับคอลัมน์ AI_Spec**
+       - ตัวอย่าง: "5.5 - 6 คิว" -> 
+         {{ "column": "AI_Spec", "operator": "gte", "value": "5.5" }},
+         {{ "column": "AI_Spec", "operator": "lte", "value": "6.0" }}
+       - ห้ามใช้ 'contains' หรือ 'in' สำหรับช่วงตัวเลขสเปค
        
-    3. **Price Logic**: 
-       - ห้ามกรองราคาถ้าไม่มีตัวเลข
-       - มีตัวเลข -> ใช้ lte (ไม่เกิน), gte (ตั้งแต่)
+    4. **Single Number Spec**: ถ้าค้นหาเลขเดียว (เช่น "5 คิว") ให้ใช้ 'contains' เหมือนเดิม
     
     Output Format (JSON):
     {{
-        "filters": [
-            {{ "column": "AI_Type", "operator": "contains", "value": "ตู้เย็น" }},
-            {{ "column": "AI_Kind", "operator": "contains", "value": "1 ประตู" }},
-            {{ "column": "AI_Spec", "operator": "contains", "value": "5" }}
-        ],
+        "filters": [ ... ],
         "sort_order": "asc"
     }}
     """
     try:
-        res = ai_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
-        )
+        res = ai_model.generate_content(prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json"))
         return json.loads(res.text.strip())
     except: return None
 # ---------------------------------------------------------
@@ -571,10 +559,8 @@ with tab2:
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
                 result_json = ask_gemini_filter(query2, cols_ai)
                 
-                # Debug ดูค่าที่ AI ส่งมา
                 with st.expander("🕵️ Debug: ดูเบื้องหลังการคิด"):
                     st.json(result_json)
-                    st.write(f"จำนวนสินค้าทั้งหมด: {len(df_search)}")
 
                 if result_json and 'filters' in result_json:
                     filters = result_json['filters']
@@ -601,29 +587,53 @@ with tab2:
                                 values_list = raw_val if isinstance(raw_val, list) else [raw_val]
                                 
                                 for val in values_list:
-                                    # เตรียมข้อมูล (ตัด .0 ทิ้งถ้ามี)
-                                    if col == 'ราคาทุนต่อหน่วย':
-                                        s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
-                                        val = float(val)
+                                    # ========================================================
+                                    # 🔥 โซนจัดการตัวเลข (Numeric Handling)
+                                    # ========================================================
+                                    is_numeric_check = False
+                                    s_val_num = None
+                                    val_num = None
+
+                                    # ถ้าเป็นการเช็ค มากกว่า/น้อยกว่า (gte, lte) หรือคอลัมน์ราคา
+                                    if col == 'ราคาทุนต่อหน่วย' or (col == 'AI_Spec' and op in ['gt', 'gte', 'lt', 'lte']):
+                                        is_numeric_check = True
+                                        try:
+                                            # แปลงค่าที่จะค้นหาเป็นตัวเลข
+                                            val_num = float(val)
+                                            
+                                            if col == 'ราคาทุนต่อหน่วย':
+                                                s_val_num = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
+                                            else:
+                                                # แกะตัวเลขออกจากข้อความสเปค (เช่น "5.5 คิว" -> 5.5)
+                                                # ใช้ Regex ดึงตัวเลขแรกที่เจอ
+                                                s_val_num = df_search[col].astype(str).str.extract(r'(\d+\.?\d*)')[0].astype(float).fillna(0)
+                                        except:
+                                            is_numeric_check = False # ถ้าแปลงไม่ได้ ให้กลับไปใช้แบบข้อความ
+                                    
+                                    # ========================================================
+                                    # เริ่มเปรียบเทียบ
+                                    # ========================================================
+                                    if is_numeric_check:
+                                        # เทียบแบบตัวเลข (แม่นยำ 100% สำหรับ 5.5 vs 1.6)
+                                        if op == 'gt': sub_mask = (s_val_num > val_num)
+                                        elif op == 'gte': sub_mask = (s_val_num >= val_num)
+                                        elif op == 'lt': sub_mask = (s_val_num < val_num)
+                                        elif op == 'lte': sub_mask = (s_val_num <= val_num)
+                                        elif op == 'equals': sub_mask = (s_val_num == val_num)
+                                        else: sub_mask = pd.Series([False] * len(df_search))
+                                        
                                     else:
+                                        # เทียบแบบข้อความ (Text) เหมือนเดิม
                                         s_val = df_search[col].astype(str)
                                         val = str(val)
                                         if val.endswith(".0"): val = val[:-2]
 
-                                    # --- 🔥 จุดแก้ไขสำคัญอยู่ตรงนี้ 🔥 ---
-                                    # เพิ่ม "or op == 'in'" ให้มันทำงานเหมือน contains
-                                    if op == 'contains' or op == 'in': 
-                                        # ตัดช่องว่างทิ้งก่อนเทียบ (แก้ปัญหา 1 ประตู vs 1ประตู)
-                                        s_val_clean = s_val.str.replace(" ", "")
-                                        val_clean = val.replace(" ", "")
-                                        sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
-                                        
-                                    elif op == 'equals': sub_mask = (s_val == val)
-                                    elif op == 'gt': sub_mask = (s_val > val)
-                                    elif op == 'gte': sub_mask = (s_val >= val)
-                                    elif op == 'lt': sub_mask = (s_val < val)
-                                    elif op == 'lte': sub_mask = (s_val <= val)
-                                    else: sub_mask = pd.Series([False] * len(df_search))
+                                        if op == 'contains' or op == 'in': 
+                                            s_val_clean = s_val.str.replace(" ", "")
+                                            val_clean = val.replace(" ", "")
+                                            sub_mask = s_val_clean.str.contains(val_clean, case=False, na=False)
+                                        elif op == 'equals': sub_mask = (s_val == val)
+                                        else: sub_mask = pd.Series([False] * len(df_search))
                                     
                                     col_mask |= sub_mask
                                     vals_log.append(f"{val}")
