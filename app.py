@@ -175,21 +175,59 @@ def clean_text(text):
     return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
 
 def ask_gemini_extract(names):
-    prompt = f"สกัดข้อมูลสินค้า JSON: {json.dumps(names, ensure_ascii=False)}\nOutput JSON Array: [{{'AI_Brand':..., 'AI_Type':..., 'AI_Spec':..., 'AI_Tags':...}}]"
+    prompt = f"""
+    คุณคือ AI สกัดข้อมูลสินค้า. นี่คือรายชื่อสินค้า:
+    {json.dumps(names, ensure_ascii=False)}
+    
+    จงวิเคราะห์สินค้าแต่ละตัว และตอบกลับเป็น JSON Array โดยมีจำนวน item เท่ากับรายชื่อที่ให้ไปเป๊ะๆ ({len(names)} items)
+    
+    Format:
+    [
+      {{
+        "AI_Brand": "ยี่ห้อ (เช่น Samsung, Unknown)",
+        "AI_Type": "ประเภท (เช่น ทีวี, ตู้เย็น)",
+        "AI_Spec": "สเปคเด่น (เช่น 55นิ้ว)",
+        "AI_Tags": "คำค้นหา (เช่น จอแบน, 4K)"
+      }}
+    ]
+    
+    ตอบเฉพาะ JSON Array เท่านั้น ไม่ต้องเกริ่นนำ
+    """
     try:
-        res = ai_model.generate_content(prompt)
-        txt = res.text.strip().replace('```json', '').replace('```', '')
-        if txt.startswith('[') and txt.endswith(']'): return json.loads(txt)
-        start, end = txt.find('['), txt.rfind(']') + 1
-        if start != -1 and end != -1: return json.loads(txt[start:end])
+        response = ai_model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # 1. ล้าง Markdown (```json ... ```)
+        if text.startswith("```json"): text = text[7:]
+        if text.startswith("```"): text = text[3:]
+        if text.endswith("```"): text = text[:-3]
+        text = text.strip()
+        
+        # 2. ค้นหาจุดเริ่มต้น [ และสิ้นสุด ] (เพื่อตัดคำพูดเวิ่นเว้อของ AI ออก)
+        start_idx = text.find('[')
+        end_idx = text.rfind(']') + 1
+        
+        if start_idx != -1 and end_idx != -1:
+            json_str = text[start_idx:end_idx]
+            return json.loads(json_str)
+        else:
+            return []
+            
+    except Exception as e:
+        print(f"JSON Parse Error: {e}") # (ดูใน Log เซิฟเวอร์ได้ถ้าอยากรู้ error)
         return []
-    except: return []
 
 def ask_gemini_filter(query, cols):
     prompt = f"แปลงคำถาม '{query}' เป็น JSON Filter Pandas. Cols: {cols}. Format: {{'filters': [{{'column':..., 'operator':..., 'value':...}}]}}"
     try:
         res = ai_model.generate_content(prompt)
-        return json.loads(res.text.strip().replace('```json', '').replace('```', ''))
+        # ใช้ Logic การล้างเหมือนกันเพื่อความชัวร์
+        text = res.text.strip()
+        start_idx = text.find('{')
+        end_idx = text.rfind('}') + 1
+        if start_idx != -1 and end_idx != -1:
+            return json.loads(text[start_idx:end_idx])
+        return None
     except: return None
 
 # ---------------------------------------------------------
