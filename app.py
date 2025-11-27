@@ -291,15 +291,15 @@ with tab1:
             if final_kw:
                 enc = urllib.parse.quote(final_kw.strip())
                 stores = [
-                    {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={enc}"},
-                    {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={enc}"},
                     {"name": "HomePro", "url": f"https://www.homepro.co.th/search?q={enc}"},
                     {"name": "PowerBuy", "url": f"https://www.powerbuy.co.th/th/search/{enc}"},
                     {"name": "ThaiWatsadu", "url": f"https://www.thaiwatsadu.com/th/search/{enc}"},
                     {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={enc}"},
                     {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={enc}"},
                     {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={enc}"},
-                    {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"}
+                    {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"},
+                    {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={enc}"},
+                    {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={enc}"},
                 ]
                 
                 # --- จัดปุ่มเป็น 2 คอลัมน์ ---
