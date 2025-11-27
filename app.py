@@ -452,6 +452,7 @@ with tab2:
     new_items_df = df_main[~df_main['รหัสสินค้า'].astype(str).str.strip().isin(processed_skus)]
     new_count = len(new_items_df)
     
+# วางทับส่วน st.expander เดิม
     with st.expander(f"⚙️ จัดการสมอง AI ({len(df_mem)} รายการเรียนรู้แล้ว)"):
         c_a1, c_a2 = st.columns([3, 1])
         c_a1.write(f"สินค้าใหม่ที่ AI ยังไม่รู้จัก: **{new_count}** รายการ")
@@ -502,6 +503,32 @@ with tab2:
                         st.rerun()
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
+
+        # --- ส่วนปุ่มล้างขยะ (รวมอยู่ใน Expander เดียวกัน) ---
+        st.divider()
+        st.write("🔧 **เครื่องมือดูแลรักษาฐานข้อมูล**")
+        
+        if st.button("🧹 ล้างข้อมูลขยะ (ลบ AI ที่ไม่มีสินค้าจริง)", type="secondary"):
+            with st.status("กำลังตรวจสอบความสะอาด...", expanded=True) as status:
+                valid_skus = df_main['รหัสสินค้า'].astype(str).str.strip().str.upper().unique()
+                df_mem['check_key'] = df_mem['SKU'].astype(str).str.strip().str.upper()
+                
+                df_mem_clean = df_mem[df_mem['check_key'].isin(valid_skus)].copy()
+                df_mem_clean = df_mem_clean.drop_duplicates(subset=['check_key'], keep='last')
+                del df_mem_clean['check_key']
+                
+                deleted_count = len(df_mem) - len(df_mem_clean)
+                
+                if deleted_count > 0:
+                    status.write(f"🗑️ พบข้อมูลขยะ {deleted_count} รายการ... กำลังลบ")
+                    success = overwrite_memory_sheet(df_mem_clean)
+                    if success:
+                        status.update(label="✅ ลบเสร็จสิ้น!", state="complete")
+                        st.cache_data.clear()
+                        time.sleep(2)
+                        st.rerun()
+                else:
+                    status.update(label="✅ ฐานข้อมูลสะอาดอยู่แล้ว", state="complete")
 
         # --- ส่วนปุ่มล้างขยะ (รวมอยู่ใน Expander เดียวกัน) ---
         st.divider()
