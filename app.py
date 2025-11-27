@@ -225,6 +225,10 @@ if check_password():
                             <b>🏷️ ยี่ห้อ:</b> {brand}
                         </div>
                         """, unsafe_allow_html=True)
+                        # --- [เพิ่มใหม่] ปุ่มค้นหา Google อัตโนมัติ ---
+                        st.write("") # เว้นบรรทัดนิดนึง
+                        google_q = urllib.parse.quote(product_name) # ใช้ชื่อสินค้าค้นหา
+                        st.link_button("🌐 ค้นหารูป/ข้อมูลใน Google", f"https://www.google.com/search?q={google_q}", use_container_width=True)
 
                     st.divider()
                     
@@ -263,6 +267,8 @@ if check_password():
                             {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={encoded_name}"},
                             {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={encoded_name}"},
                             {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={encoded_name}"}
+                            {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={encoded_name}"},
+                            {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={encoded_name}"},
                         ]
                         
                         # สร้างปุ่ม
