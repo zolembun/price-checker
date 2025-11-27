@@ -236,31 +236,26 @@ def ask_gemini_extract(names):
         return []
 
 def ask_gemini_filter(query, columns):
+    # Prompt แบบประหยัด Token (สั้น กระชับ ตรงเป้า)
     prompt = f"""
-    Role: คุณคือผู้เชี่ยวชาญ Data Query หน้าที่คือแปลงคำถามธรรมชาติเป็น Filter JSON
-    User Query: "{query}"
-    Available Columns: {columns}
+    Task: Convert "{query}" to JSON Filters. Cols: {columns}
+    Rules:
+    1. Split ranges/options into multiple values (e.g. "3-4L" -> "3", "4")
+    2. REMOVE UNITS from values (e.g. "4 Liters" -> "4")
+    3. Use 'contains' for text, 'gt'/'lt' for price.
     
-    Instruction:
-    1. สร้างเงื่อนไขการกรอง (Filter Conditions) ที่ "กว้างและยืดหยุ่น" ที่สุด
-    2. **สำคัญมาก**: สำหรับคอลัมน์ 'AI_Spec' หรือ 'AI_Tags' ห้ามใส่หน่วยยาวๆ 
-       - ผิด: value: "4 ลิตร" (เพราะถ้าในฐานข้อมูลเป็น 4L จะหาไม่เจอ)
-       - ถูก: value: "4" (จะเจอทั้ง 4L, 4 ลิตร, 4.0)
-    3. สำหรับราคา ให้ใช้ operator 'gt' (มากกว่า) หรือ 'lt' (น้อยกว่า) เท่านั้น อย่าใช้ equals
-    
-    Output Format (JSON Only):
+    Response JSON:
     {{
         "filters": [
-            {{ "column": "col_name", "operator": "contains/equals/gt/lt", "value": "val" }}
+            {{ "column": "col_name", "operator": "contains/gt/lt", "value": "val" }}
         ]
     }}
     """
     try:
+        # ใช้ Flash model (ประหยัดสุด) + บังคับ JSON
         res = ai_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
+            prompt, 
+            generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
         )
         return json.loads(res.text.strip())
     except: return None
@@ -423,30 +418,61 @@ with tab2:
     
     col_q1, col_q2 = st.columns([4, 1])
     query2 = col_q1.text_input("พิมพ์คำค้นหาแบบธรรมชาติ", placeholder="เช่น ตู้เย็น 2 ประตู ราคาไม่เกิน 8000", key="search_tab2")
-    if col_q2.button("ค้นหา AI", type="primary"):
+   if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
                 cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย']
                 filters = ask_gemini_filter(query2, cols_ai)
                 
                 if filters and 'filters' in filters:
-                    mask = pd.Series([True] * len(df_search))
+                    # 1. เริ่มต้น: สมมติว่าเอาทุกแถวไว้ก่อน
+                    final_mask = pd.Series([True] * len(df_search))
                     active_conds = []
+                    
+                    # 2. จัดกลุ่ม Filter ตามคอลัมน์ (Group by Column)
+                    from collections import defaultdict
+                    grouped_filters = defaultdict(list)
+                    for f in filters['filters']:
+                        grouped_filters[f['column']].append(f)
+                    
                     try:
-                        for f in filters['filters']:
-                            col, op, val = f['column'], f['operator'], f['value']
+                        # 3. วนลูปทีละคอลัมน์ (Logic AND ระหว่างคอลัมน์)
+                        for col, conditions in grouped_filters.items():
                             if col not in df_search.columns: continue
-                            active_conds.append(f"{col} {op} {val}")
                             
-                            s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0) if col == 'ราคาทุนต่อหน่วย' else df_search[col].astype(str)
-                            val = float(val) if col == 'ราคาทุนต่อหน่วย' else str(val)
+                            # สร้าง Mask ว่างๆ สำหรับคอลัมน์นี้ (เพื่อรอสะสมด้วย OR)
+                            col_mask = pd.Series([False] * len(df_search))
+                            vals_log = []
                             
-                            if op == 'contains': mask &= s_val.str.contains(val, case=False, na=False)
-                            elif op == 'equals': mask &= (s_val == val)
-                            elif op == 'gt': mask &= (s_val > val)
-                            elif op == 'lt': mask &= (s_val < val)
+                            # 4. วนลูปเงื่อนไขภายในคอลัมน์เดียวกัน (Logic OR)
+                            for f in conditions:
+                                op, val = f['operator'], f['value']
+                                
+                                # แปลงประเภทข้อมูลให้ตรงกัน
+                                if col == 'ราคาทุนต่อหน่วย':
+                                    s_val = pd.to_numeric(df_search[col], errors='coerce').fillna(0)
+                                    val = float(val)
+                                else:
+                                    s_val = df_search[col].astype(str)
+                                    val = str(val)
+                                
+                                # ตรวจสอบเงื่อนไข
+                                if op == 'contains': sub_mask = s_val.str.contains(val, case=False, na=False)
+                                elif op == 'equals': sub_mask = (s_val == val)
+                                elif op == 'gt': sub_mask = (s_val > val)
+                                elif op == 'lt': sub_mask = (s_val < val)
+                                else: sub_mask = pd.Series([False] * len(df_search))
+                                
+                                # รวมพลังด้วย OR (เจออันไหนก็เอา)
+                                col_mask |= sub_mask
+                                vals_log.append(f"{val}")
+                            
+                            # เอาผลสรุปของคอลัมน์นี้ ไป AND กับผลรวมใหญ่
+                            final_mask &= col_mask
+                            active_conds.append(f"{col}: {' | '.join(vals_log)}")
                         
-                        results = df_search[mask]
+                        # 5. แสดงผลลัพธ์
+                        results = df_search[final_mask]
                         if not results.empty:
                             st.success(f"✅ พบ {len(results)} รายการ")
                             st.dataframe(
@@ -457,8 +483,11 @@ with tab2:
                                 },
                                 use_container_width=True, hide_index=True
                             )
-                        else: st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
-                    except: st.error("เกิดข้อผิดพลาดในการกรอง")
+                        else: 
+                            st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
+                            
+                    except Exception as e: st.error(f"Error: {e}")
                 else:
+                    # Fallback (ค้นหาแบบบ้านๆ ถ้า AI งง)
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
