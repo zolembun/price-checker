@@ -41,7 +41,7 @@ if not check_password():
     st.stop()
 
 # ---------------------------------------------------------
-# 3. CSS Styling (รวมสวยๆ ไว้ที่เดียว)
+# 3. CSS Styling
 # ---------------------------------------------------------
 st.markdown("""
 <style>
@@ -76,7 +76,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 4. เชื่อมต่อ Services (Connecting)
+# 4. เชื่อมต่อ Services
 # ---------------------------------------------------------
 @st.cache_resource
 def init_services():
@@ -90,8 +90,16 @@ def init_services():
         
         sheets_service = build('sheets', 'v4', credentials=creds)
         drive_service = build('drive', 'v3', credentials=creds)
+        
+        # Config Gemini
         genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # 🔥 แก้ไขจุดที่ Error: เปลี่ยนชื่อโมเดลเป็นรุ่น Latest
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        except:
+            # Fallback ถ้า latest ใช้ไม่ได้ ให้ลองตัวธรรมดาหรือ Pro
+            model = genai.GenerativeModel('gemini-1.5-flash-001')
         
         return sheets_service, drive_service, model
     except Exception as e:
@@ -109,7 +117,7 @@ except:
     st.stop()
 
 # ---------------------------------------------------------
-# 5. ฟังก์ชันโหลด/บันทึกข้อมูล (Data Management)
+# 5. ฟังก์ชันโหลด/บันทึกข้อมูล
 # ---------------------------------------------------------
 @st.cache_data(ttl=600)
 def load_data_master():
@@ -131,7 +139,8 @@ def load_data_master():
                     df_main[col] = pd.to_numeric(df_main[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
         else:
             df_main = pd.DataFrame()
-# AI Memory Data
+
+        # AI Memory Data
         try:
             res_mem = sheets_svc.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:E").execute()
             vals_mem = res_mem.get('values', [])
@@ -139,35 +148,30 @@ def load_data_master():
             if vals_mem and len(vals_mem) > 1:
                 headers = vals_mem[0]
                 rows = vals_mem[1:]
-                # ✨ แก้ไข: ถมช่องว่างให้เต็ม (Fix Jagged Rows)
-                # ถ้าข้อมูลแถวไหนสั้นกว่าหัวข้อ ให้เติม None ใส่เข้าไปจนครบ
                 fixed_rows = [r + [None]*(len(headers)-len(r)) for r in rows]
-                
                 df_mem = pd.DataFrame(fixed_rows, columns=headers)
             else:
-                # กรณีมีแต่หัวข้อ หรือไม่มีข้อมูลเลย
                 df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
-                
-        except Exception as e:
-            # แนะนำให้ print error ออกมาดูด้วยถ้าทำได้
-            # st.error(f"Debug Mem Error: {e}") 
+        except:
             df_mem = pd.DataFrame(columns=['SKU', 'AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags'])
+
         return df_main, df_mem, file_name, last_update
 
     except Exception as e:
         st.error(f"Load Data Error: {e}")
         return pd.DataFrame(), pd.DataFrame(), "Error", "-"
 
-def append_to_sheet(new_data_df):
-    values = new_data_df.values.tolist()
-    body = {'values': values}
+def append_to_sheet(data_values):
+    body = {'values': data_values}
     try:
         sheets_svc.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID, range="AI_Memory!A:A", 
             valueInputOption="USER_ENTERED", body=body
         ).execute()
         return True
-    except: return False
+    except Exception as e: 
+        st.error(f"Save Error: {e}")
+        return False
 
 @st.cache_data(ttl=600)
 def merge_data(df_main, df_mem):
@@ -184,10 +188,9 @@ def clean_text(text):
     return re.sub(r'[^a-zA-Z0-9ก-๙]', '', text).lower()
 
 # ---------------------------------------------------------
-# 🧠 ฟังก์ชัน AI (เวอร์ชั่น Force JSON + Debug)
+# 🔥 ฟังก์ชัน AI (Force JSON + Debug)
 # ---------------------------------------------------------
 def ask_gemini_extract(names):
-    # 1. สร้าง Prompt แบบชัดเจนพร้อมตัวอย่าง
     prompt = f"""
     Analyze the following list of product names and extract attributes.
     Input List: {json.dumps(names, ensure_ascii=False)}
@@ -203,7 +206,6 @@ def ask_gemini_extract(names):
     """
     
     try:
-        # 2. ใช้ Generation Config บังคับ JSON (สำคัญมาก!)
         response = ai_model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -212,25 +214,16 @@ def ask_gemini_extract(names):
         )
         
         text = response.text.strip()
-        
-        # --- [ส่วน Debug: แสดงสิ่งที่ AI ตอบมาให้เห็นบนหน้าจอ] ---
-        # (ถ้า AI ตอบมาแปลกๆ เราจะเห็นตรงนี้)
-        # st.sidebar.text_area("Raw AI Response", text, height=100) 
-        # -------------------------------------------------------
-
         data = json.loads(text)
         
-        # 3. ตรวจสอบและ Normalize ข้อมูล
         normalized_data = []
         for item in data:
-            # พยายามดึงข้อมูลจาก Key ต่างๆ ที่เป็นไปได้
             new_item = {
                 "AI_Brand": item.get("AI_Brand") or item.get("Brand") or "Unknown",
                 "AI_Type": item.get("AI_Type") or item.get("Type") or "Other",
                 "AI_Spec": item.get("AI_Spec") or item.get("Spec") or "-",
                 "AI_Tags": item.get("AI_Tags") or item.get("Tags") or ""
             }
-            # แปลง List เป็น String (กรณี AI เผลอตอบ Tags เป็น List)
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
                 
@@ -245,21 +238,21 @@ def ask_gemini_extract(names):
 def ask_gemini_filter(query, cols):
     prompt = f"แปลงคำถาม '{query}' เป็น JSON Filter Pandas. Cols: {cols}. Format: {{'filters': [{{'column':..., 'operator':..., 'value':...}}]}}"
     try:
-        res = ai_model.generate_content(prompt)
-        # ใช้ Logic การล้างเหมือนกันเพื่อความชัวร์
-        text = res.text.strip()
-        start_idx = text.find('{')
-        end_idx = text.rfind('}') + 1
-        if start_idx != -1 and end_idx != -1:
-            return json.loads(text[start_idx:end_idx])
-        return None
+        # ใช้ config json เหมือนกันเพื่อความชัวร์
+        res = ai_model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
+        return json.loads(res.text.strip())
     except: return None
 
 # ---------------------------------------------------------
 # 6. MAIN APP UI (TABS)
 # ---------------------------------------------------------
 
-# โหลดข้อมูลทีเดียวใช้ได้ทั้ง 2 แท็บ
+# โหลดข้อมูล
 df_main, df_mem, file_name, last_update = load_data_master()
 
 st.title("💰 ระบบเช็คราคาสินค้า & AI")
@@ -269,7 +262,7 @@ st.caption(f"📂 ฐานข้อมูล: {file_name} | 🕒 อัปเ�
 tab1, tab2 = st.tabs(["🏠 เช็คราคารายตัว (Code/Name)", "🤖 ค้นหาอัจฉริยะ (AI Search)"])
 
 # =========================================================
-# TAB 1: เช็คราคารายตัว (Logic หน้า 1 เดิม + อัปเกรด)
+# TAB 1: เช็คราคารายตัว
 # =========================================================
 with tab1:
     st.info("💡 เหมาะสำหรับ: ค้นหาเมื่อรู้ 'รหัสสินค้า' หรือ 'ชื่อรุ่น' ที่แน่นอน")
@@ -280,24 +273,20 @@ with tab1:
         match_index = -1
         found_by = ""
         
-        # Smart Search Logic
         query_clean = clean_text(query1)
         sku_clean_series = df_main['รหัสสินค้า'].astype(str).apply(clean_text)
         desc_clean_series = df_main['รายละเอียดสินค้า'].astype(str).apply(clean_text)
         
-        # ด่าน 1: รหัสสินค้า
         sku_matches = df_main[sku_clean_series.str.contains(query_clean, na=False)]
         if not sku_matches.empty:
             match_index = sku_matches.index[0]
             found_by = "⚡ เจอรหัสสินค้า"
         else:
-            # ด่าน 2: รายละเอียด
             desc_matches = df_main[desc_clean_series.str.contains(query_clean, na=False)]
             if not desc_matches.empty:
                 match_index = desc_matches.index[0]
                 found_by = "🔎 เจอในรายละเอียด"
             else:
-                # ด่าน 3: AI Helper
                 keywords = list(filter(None, re.split(r'[^a-zA-Z0-9]', query1)))
                 if not keywords: keywords = [query1]
                 candidates = df_main[df_main.astype(str).apply(lambda x: any(k.lower() in x.lower() for k in keywords), axis=1)]
@@ -313,7 +302,6 @@ with tab1:
                         found_by = "🤖 AI ค้นพบ"
                     except: match_index = -1
 
-        # แสดงผล Tab 1
         if match_index != -1 and match_index in df_main.index:
             item = df_main.loc[match_index]
             cost = item.get('ราคาทุนต่อหน่วย', 0)
@@ -324,7 +312,6 @@ with tab1:
 
             st.success(f"{found_by}: {name}")
             
-            # คำนวณราคา
             target_margin = 12
             sell_price = cost * (1 + (target_margin/100))
             profit = sell_price - cost
@@ -336,9 +323,10 @@ with tab1:
                 st.markdown(f"""<div class="selling-box"><div style="color:#555;font-weight:bold;">🟢 ขายแนะนำ (+{target_margin}%)</div><div class="price-value-sell">{sell_price:,.0f}</div><div style="color:#1b5e20;">กำไร {profit:,.0f} บาท</div></div>""", unsafe_allow_html=True)
             with c3:
                 st.markdown(f"""<div class="info-box"><b>🆔 รหัส:</b> {mid}<br><b>📦 สต้อก:</b> {stock}<br><b>🏷️ ยี่ห้อ:</b> {brand}</div>""", unsafe_allow_html=True)
+                
                 st.write("")
                 g_q = urllib.parse.quote(name)
-                st.link_button("🌐 ค้นหา Google", f"https://www.google.com/search?q={g_q}", use_container_width=True)
+                st.link_button("🌐 ค้นหารูป/ข้อมูลใน Google", f"https://www.google.com/search?q={g_q}", use_container_width=True)
 
             st.divider()
             with st.expander("ดูตาราง Margin (3% - 30%)", expanded=True):
@@ -354,18 +342,17 @@ with tab1:
             if final_kw:
                 enc = urllib.parse.quote(final_kw.strip())
                 stores = [
+                    {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={enc}"},
+                    {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={enc}"},
                     {"name": "HomePro", "url": f"https://www.homepro.co.th/search?q={enc}"},
                     {"name": "PowerBuy", "url": f"https://www.powerbuy.co.th/th/search/{enc}"},
                     {"name": "ThaiWatsadu", "url": f"https://www.thaiwatsadu.com/th/search/{enc}"},
                     {"name": "Big C", "url": f"https://www.bigc.co.th/search?q={enc}"},
                     {"name": "Global", "url": f"https://globalhouse.co.th/search?keyword={enc}"},
                     {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={enc}"},
-                    {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"},
-                    {"name": "Shopee", "url": f"https://shopee.co.th/search?keyword={enc}"},
-                    {"name": "Lazada", "url": f"https://www.lazada.co.th/catalog/?q={enc}"},
+                    {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"}
                 ]
                 
-                # --- จัดปุ่มเป็น 2 คอลัมน์ ---
                 cols = st.columns(2)
                 for i, s in enumerate(stores):
                     with cols[i%2]: st.link_button(f"🔍 {s['name']}", s['url'], use_container_width=True)
@@ -373,12 +360,11 @@ with tab1:
             if query1: st.warning(f"❌ ไม่พบสินค้า: '{query1}'")
 
 # =========================================================
-# TAB 2: ค้นหาอัจฉริยะ AI (Logic หน้า 2 เดิม)
+# TAB 2: ค้นหาอัจฉริยะ AI
 # =========================================================
 with tab2:
     st.info("💡 เหมาะสำหรับ: ค้นหาแบบประโยค เช่น 'ทีวี Samsung ไม่เกินหมื่น', 'แอร์ inverter'")
     
-    # ส่วนจัดการ AI
     processed_skus = df_mem['SKU'].astype(str).str.strip().tolist() if not df_mem.empty else []
     new_items_df = df_main[~df_main['รหัสสินค้า'].astype(str).str.strip().isin(processed_skus)]
     new_count = len(new_items_df)
@@ -406,7 +392,7 @@ with tab2:
                         time.sleep(4)
                     
                     if res_save:
-                        append_to_sheet(pd.DataFrame(res_save))
+                        append_to_sheet(res_save)
                         status.update(label="เสร็จสิ้น!", state="complete")
                         st.balloons()
                         st.cache_data.clear()
@@ -417,7 +403,6 @@ with tab2:
 
     st.divider()
     
-    # Interface ค้นหา AI
     df_search = merge_data(df_main, df_mem)
     
     col_q1, col_q2 = st.columns([4, 1])
@@ -459,6 +444,5 @@ with tab2:
                         else: st.warning(f"❌ ไม่พบสินค้า (เงื่อนไข: {', '.join(active_conds)})")
                     except: st.error("เกิดข้อผิดพลาดในการกรอง")
                 else:
-                    # Fallback
                     simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
                     st.dataframe(df_search[simple], use_container_width=True)
