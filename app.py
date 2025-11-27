@@ -252,39 +252,37 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (เวอร์ชั่น Ultra-Safe: ไม่พังแน่นอน)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 🔥 ฟังก์ชัน AI (โหมด DEBUG: แสดง Error ให้เห็นจะๆ)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
-    # เตรียมข้อมูล Default ไว้ก่อน (ถ้า AI พังจะได้มีค่าคืน ไม่ Error)
+    # เตรียมค่า Default ไว้
     default_list = []
     for _ in names:
         default_list.append({
-            "AI_Brand": "Unknown", 
-            "AI_Type": "Other", 
-            "AI_Kind": "", 
-            "AI_Spec": "-", 
-            "AI_Tags": ""
+            "AI_Brand": "Unknown", "AI_Type": "Other", 
+            "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""
         })
 
-    # ถ้าไม่มีข้อมูลส่งมา ก็คืนค่าว่างไปเลย
     if not names: return []
 
-    # Prompt แบบกระชับ สั่งตรงๆ เหมือนสั่งคนทำงาน
+    # Prompt สั่งงาน
     prompt = f"""
-    Help me extract product details from this list:
+    Extract product info from this list:
     {json.dumps(names, ensure_ascii=False)}
 
-    Please return a JSON Array of objects with these fields:
-    - "AI_Brand": Brand name (e.g. Samsung).
-    - "AI_Type": Category in Thai (e.g. ตู้เย็น, แอร์).
-    - "AI_Kind": Sub-type/Feature in Thai (Important!). 
-      (Examples: 1 ประตู, 2 ประตู, Inverter, ฝาบน, ฝาหน้า). 
-      If not found, use empty string "".
-    - "AI_Spec": Capacity/Size (e.g. 5.2 คิว, 9000 BTU).
-    - "AI_Tags": Keywords.
+    Return JSON Array with these keys:
+    - AI_Brand
+    - AI_Type (Category in Thai)
+    - AI_Kind (Sub-type in Thai e.g. 1 ประตู, ฝาบน. If unknown use "")
+    - AI_Spec (Capacity/Size)
+    - AI_Tags
 
-    Strictly return ONLY JSON. No Markdown.
+    Response Format: JSON Array ONLY. No Markdown.
     """
     
     try:
+        # เรียก AI
         response = ai_model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -294,13 +292,26 @@ def ask_gemini_extract(names):
         
         txt = response.text.strip()
         
-        # ล้าง Markdown ออก (กันเหนียว)
-        if "```" in txt:
-            txt = re.sub(r"^```json|^```", "", txt, flags=re.MULTILINE).strip()
-            txt = re.sub(r"```$", "", txt, flags=re.MULTILINE).strip()
-            
-        data = json.loads(txt)
+        # ---------------------------------------------------
+        # 🕵️‍♀️ ส่วน DEBUG: แสดงผลลัพธ์ดิบๆ บนหน้าจอ
+        # ---------------------------------------------------
+        with st.expander(f"🔍 X-Ray: ดูสิ่งที่ AI ตอบมา (Batch นี้)", expanded=True):
+            if not txt:
+                st.error("❌ AI ส่งค่าว่างกลับมา (Empty Response)")
+            else:
+                st.code(txt, language='json') # โชว์ข้อความที่ AI ส่งมา
+        # ---------------------------------------------------
+
+        # ล้าง Markdown ออก (ถ้ามี)
+        txt_clean = re.sub(r"```json|```", "", txt).strip()
         
+        try:
+            data = json.loads(txt_clean)
+        except json.JSONDecodeError as json_err:
+            st.error(f"💥 แปลง JSON ไม่ได้: {json_err}")
+            return default_list
+
+        # จัดระเบียบข้อมูล
         normalized_data = []
         for item in data:
             new_item = {
@@ -310,7 +321,6 @@ def ask_gemini_extract(names):
                 "AI_Spec": item.get("AI_Spec") or "-",
                 "AI_Tags": item.get("AI_Tags") or ""
             }
-            # แปลง Tags เป็น string ถ้ามาเป็น list
             if isinstance(new_item["AI_Tags"], list):
                 new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
                 
@@ -319,8 +329,8 @@ def ask_gemini_extract(names):
         return normalized_data
 
     except Exception as e:
-        print(f"AI Error: {e}")
-        # 🔥 จุดสำคัญ: ถ้า Error ให้คืนค่า Default กลับไป โปรแกรมจะไม่แดง!
+        # แสดง Error ตัวแดงๆ บนหน้าจอ
+        st.error(f"☠️ Critical Error: {e}")
         return default_list
 def ask_gemini_filter(query, columns):
     # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
