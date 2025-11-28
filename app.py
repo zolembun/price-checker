@@ -530,26 +530,40 @@ with tab2:
                         status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
                         
                         # รวมชื่อ + ชนิด ส่งให้ AI
+                       # --- ✂️ เริ่มแก้จุดที่ 1 (เตรียมข้อมูล) ---
+                        # รวมชื่อส่ง AI
                         names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
                         ai_res = ask_gemini_extract(names_for_ai)
                         
+                        # เตรียมข้อมูลลงชีท (🔥 แก้ตรงนี้: ใส่ str() ครอบทุกตัว กัน Google Sheet ปฏิเสธ)
+                        res_save = []
                         for idx, item in enumerate(chunk):
                             ar = ai_res[idx] if idx < len(ai_res) else {}
                             res_save.append([
-                                item['SKU'], 
-                                ar.get('AI_Brand','Unknown'), 
-                                ar.get('AI_Type','Other'), 
-                                ar.get('AI_Spec','-'), 
-                                ar.get('AI_Tags',''),
-                                ar.get('AI_Kind','') 
+                                str(item['SKU']).strip(),           # ต้องมี str()
+                                str(ar.get('AI_Brand','Unknown')),  # ต้องมี str()
+                                str(ar.get('AI_Type','Other')),
+                                str(ar.get('AI_Spec','-')),
+                                str(ar.get('AI_Tags','')),
+                                str(ar.get('AI_Kind',''))
                             ])
-                        time.sleep(4)
+                        # --- ✂️ จบจุดที่ 1 ---
                     
-                    if res_save:
-                        append_to_sheet(res_save)
-                        status.update(label="เสร็จสิ้น!", state="complete")
-                        st.balloons()
-                        st.cache_data.clear()
+                # --- ✂️ เริ่มแก้จุดที่ 2 (บันทึกและล้าง Cache) ---
+                        if res_save:
+                            try:
+                                result = append_to_sheet(res_save)
+                                if result:
+                                    status.write(f"✅ บันทึก Batch {(i//BATCH)+1} สำเร็จ!")
+                                    # 🔥 เพิ่มบรรทัดนี้: เพื่อให้มั่นใจว่าครั้งหน้าโหลดมาจะเจอข้อมูลใหม่แน่นอน
+                                    st.cache_data.clear() 
+                                else:
+                                    status.error("❌ บันทึกไม่สำเร็จ (ตรวจสอบสิทธิ์ Sheet)")
+                            except Exception as e:
+                                status.error(f"❌ Error: {e}")
+                        
+                        time.sleep(1) # พักนิดนึง
+                        # --- ✂️ จบจุดที่ 2 ---
                         time.sleep(1)
                         st.rerun()
         else:
