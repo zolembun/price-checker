@@ -255,93 +255,49 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (โหมด DEBUG: แสดง Error ให้เห็นจะๆ)
 # ---------------------------------------------------------
-def ask_gemini_extract(names):
-    # เตรียมค่า Default ไว้
-    default_list = []
-    for _ in names:
-        default_list.append({
-            "AI_Brand": "Unknown", "AI_Type": "Other", 
-            "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""
-        })
-
-    if not names: return []
-
-    # Prompt สั่งงาน
-    prompt = f"""
-    Extract product info from this list:
-    {json.dumps(names, ensure_ascii=False)}
-
-    Return JSON Array with these keys:
-    - AI_Brand
-    - AI_Type (Category in Thai)
-    - AI_Kind (Sub-type in Thai e.g. 1 ประตู, ฝาบน. If unknown use "")
-    - AI_Spec (Capacity/Size)
-    - AI_Tags
-
-    Response Format: JSON Array ONLY. No Markdown.
-    """
-    
-    try:
-        # เรียก AI
-        response = ai_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
-        )
-        
-        txt = response.text.strip()
-        
-        # ---------------------------------------------------
-        # 🕵️‍♀️ ส่วน DEBUG: แสดงผลลัพธ์ดิบๆ บนหน้าจอ
-        # ---------------------------------------------------
-        with st.expander(f"🔍 X-Ray: ดูสิ่งที่ AI ตอบมา (Batch นี้)", expanded=True):
-            if not txt:
-                st.error("❌ AI ส่งค่าว่างกลับมา (Empty Response)")
-            else:
-                st.code(txt, language='json') # โชว์ข้อความที่ AI ส่งมา
-        # ---------------------------------------------------
-
-        # ล้าง Markdown ออก (ถ้ามี)
-        txt_clean = re.sub(r"```json|```", "", txt).strip()
-        
+def ask_gemini_filter(query, columns, df_lookup=None):
+    # ---------------------------------------------------------
+    # PART 1: เตรียม Context (ส่งโพย Top 50 ให้ AI รู้จักสินค้าในร้าน)
+    # ---------------------------------------------------------
+    context_str = ""
+    if df_lookup is not None:
         try:
-            data = json.loads(txt_clean)
-        except json.JSONDecodeError as json_err:
-            st.error(f"💥 แปลง JSON ไม่ได้: {json_err}")
-            return default_list
-
-        # จัดระเบียบข้อมูล
-        normalized_data = []
-        for item in data:
-            new_item = {
-                "AI_Brand": item.get("AI_Brand") or "Unknown",
-                "AI_Type": item.get("AI_Type") or "Other",
-                "AI_Kind": item.get("AI_Kind") or "", 
-                "AI_Spec": item.get("AI_Spec") or "-",
-                "AI_Tags": item.get("AI_Tags") or ""
-            }
-            if isinstance(new_item["AI_Tags"], list):
-                new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
-                
-            normalized_data.append(new_item)
+            # เรียงตามความนิยม (Most Popular)
+            brands = df_lookup['AI_Brand'].value_counts().index.tolist()
+            types = df_lookup['AI_Type'].value_counts().index.tolist()
+            kinds = df_lookup['AI_Kind'].value_counts().index.tolist()
             
-        return normalized_data
+            # Limit Token: ส่งไปแค่ตัวท็อปๆ
+            brand_list = json.dumps(brands[:60], ensure_ascii=False)
+            type_list = json.dumps(types[:40], ensure_ascii=False)
+            kind_list = json.dumps(kinds[:60], ensure_ascii=False)
+            
+            context_str = f"""
+            [Database Context - Use these exact values for mapping]
+            - Known Brands: {brand_list}
+            - Known Types: {type_list}
+            - Known Kinds: {kind_list}
+            """
+        except: pass
 
-    except Exception as e:
-        # แสดง Error ตัวแดงๆ บนหน้าจอ
-        st.error(f"☠️ Critical Error: {e}")
-        return default_list
-def ask_gemini_filter(query, columns):
-    # Prompt ปรับปรุงใหม่: รองรับช่วงตัวเลขสเปค (Spec Range)
+    # ---------------------------------------------------------
+    # PART 2: Prompt สั่งงาน (ผสานกฎเรื่องทศนิยมและช่วงตัวเลข)
+    # ---------------------------------------------------------
     prompt = f"""
     Role: คุณคือ Search Engine อัจฉริยะ แปลงคำค้นหา "{query}" เป็น JSON Filter
-    Columns: {columns}
+    Target Columns: {columns}
     
+    {context_str}
+
     Instruction (Strict Rules):
-    1. **Category/Kind**: แยก AI_Type (ประเภท) กับ AI_Kind (ชนิด) ให้ชัดเจน
-    2. **Price Logic**: ถ้ามีตัวเลขราคา ให้ใช้ lte (ไม่เกิน), gte (ตั้งแต่)
-    
+    1. **Context Mapping (สำคัญที่สุด)**: 
+       - ก่อนจะตัดสินใจ ให้ดูใน [Database Context] ด้านบนก่อน
+       - ถ้าคำค้นหาตรงกับ Known Brands/Types ให้ใช้คำนั้นเป๊ะๆ (เช่น User พิมพ์ "Mitsu" -> ต้องแก้เป็น "MITSUBISHI" ตามในลิสต์)
+
+    2. **Price & Spec Logic**: 
+       - ถ้าเจอตัวเลขราคา ให้ใช้ 'lte' (ไม่เกิน) หรือ 'gte' (ตั้งแต่)
+       - ห้ามใช้ 'contains' กับตัวเลขราคา
+
     3. **Decimal Range Strategy (Spec Only)**: 
        - ถ้า User ระบุช่วงขนาด/สเปค (เช่น "5.5 - 6 คิว", "9000-12000 btu") 
        - **ให้ใช้ operator 'gte' (>=) และ 'lte' (<=) กับคอลัมน์ AI_Spec**
@@ -349,15 +305,18 @@ def ask_gemini_filter(query, columns):
          {{ "column": "AI_Spec", "operator": "gte", "value": "5.5" }},
          {{ "column": "AI_Spec", "operator": "lte", "value": "6.0" }}
        - ห้ามใช้ 'contains' หรือ 'in' สำหรับช่วงตัวเลขสเปค
-       
-    4. **Single Number Spec**: ถ้าค้นหาเลขเดียว (เช่น "5 คิว") ให้ใช้ 'contains' เหมือนเดิม
-    
-    Output Format (JSON):
+
+    4. **Single Number Spec**: 
+       - ถ้าค้นหาเลขเดียว (เช่น "5 คิว") ให้ใช้ 'contains' เหมือนเดิม
+       - แต่ถ้าเป็นทศนิยม (เช่น "10.5 kg") ให้ใช้ 'contains' หรือ 'eq' ที่ระบุค่า "10.5" ชัดเจน
+
+    Output Format (JSON ONLY):
     {{
         "filters": [ ... ],
         "sort_order": "asc"
     }}
     """
+    
     try:
         res = ai_model.generate_content(prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json"))
         return json.loads(res.text.strip())
@@ -602,7 +561,7 @@ with tab2:
                 
                 try:
                     cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
-                    result_json = ask_gemini_filter(query2, cols_ai)
+                    result_json = ask_gemini_filter(query2, cols_ai, df_lookup=df_search)
                     
                     # ถ้าได้ JSON กลับมา ให้เริ่มการกรอง
                     if result_json and 'filters' in result_json:
