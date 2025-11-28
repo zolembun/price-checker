@@ -590,33 +590,33 @@ with tab2:
     # -------------------------------------------------------------
     # ส่วนค้นหา AI (ฉบับ Universal 100%: ใช้สเกลตัวเลขคัดกรอง)
     # -------------------------------------------------------------
+    # -------------------------------------------------------------
+    # 🔥 ส่วนปุ่มค้นหา (ฉบับแก้ไข: ไม่เงียบหายแน่นอน)
+    # -------------------------------------------------------------
     if col_q2.button("ค้นหา AI", type="primary"):
         if query2:
             with st.spinner('🤖 AI กำลังคิด...'):
-                cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
-                result_json = ask_gemini_filter(query2, cols_ai)
+                # 1. ตั้งค่าเริ่มต้นให้ "ผ่านหมด" ไว้ก่อน (กันเหนียว)
+                final_mask = pd.Series([True] * len(df_search))
+                active_conds = [] 
                 
-                with st.expander("🕵️ Debug: ดูเบื้องหลังการคิด"):
-                    st.json(result_json)
-
-                if result_json and 'filters' in result_json:
-                    filters = result_json['filters']
-                    sort_order = result_json.get('sort_order')
+                try:
+                    cols_ai = ['AI_Brand', 'AI_Type', 'AI_Spec', 'AI_Tags', 'ราคาทุนต่อหน่วย', 'AI_Kind']
+                    result_json = ask_gemini_filter(query2, cols_ai)
                     
-                    final_mask = pd.Series([True] * len(df_search))
-                    active_conds = []
-                    
-                    from collections import defaultdict
-                    grouped_filters = defaultdict(list)
-                    for f in filters:
-                        grouped_filters[f['column']].append(f)
-                    
-                    # --- เริ่มต้นส่วนที่ Copy ไปวาง ---
-                    try:
-                        # กำหนดคอลัมน์ที่จะค้นหาแบบข้อความ (เพิ่ม AI_Tags แล้ว)
+                    # ถ้าได้ JSON กลับมา ให้เริ่มการกรอง
+                    if result_json and 'filters' in result_json:
+                        filters = result_json['filters']
+                        sort_order = result_json.get('sort_order')
+                        
+                        # กำหนดคอลัมน์ที่จะค้นหาข้อความ
                         text_search_cols = ['AI_Type', 'AI_Kind', 'AI_Tags', 'AI_Brand', 'รายละเอียดสินค้า']
+                        
+                        from collections import defaultdict
+                        grouped_filters = defaultdict(list)
+                        for f in filters: grouped_filters[f['column']].append(f)
 
-                        # ฟังก์ชันแกะตัวเลข (Universal)
+                        # --- ฟังก์ชันช่วย (Inner Functions) ---
                         def extract_numbers_universal(text):
                             try:
                                 clean_text = str(text).replace(',', '')
@@ -625,7 +625,6 @@ with tab2:
                                 return [float(n) for n in nums if n and n != '.']
                             except: return []
 
-                        # ฟังก์ชันตรวจสอบเงื่อนไขตัวเลข
                         def validate_row(extracted_val, conditions):
                             if isinstance(extracted_val, list):
                                 for num in extracted_val:
@@ -650,74 +649,72 @@ with tab2:
                                     if op == 'lte' and not (num <= limit): return False
                                 return True
 
-                        # เริ่มวนลูปกรองข้อมูล
+                        # --- เริ่มวนลูปกรอง (Logic เดิมที่ถูกต้อง) ---
                         for col_ai_suggested, conditions in grouped_filters.items():
                             if col_ai_suggested not in df_search.columns: continue
 
-                            # แยกเงื่อนไข ตัวเลข vs ข้อความ
                             numeric_conds = [f for f in conditions if f['operator'] in ['gt', 'gte', 'lt', 'lte']]
                             choice_conds = [f for f in conditions if f['operator'] not in ['gt', 'gte', 'lt', 'lte']]
                             
-                            vals_log = [] # เก็บ Log การค้นหา
+                            vals_log = [] 
 
-                            # -------------------------------------------------
-                            # A. จัดการเงื่อนไขตัวเลข (Spec, Price) -> เช็คตรงคอลัมน์เดิม (Strict)
-                            # -------------------------------------------------
+                            # A. กรองตัวเลข
                             range_mask = pd.Series([True] * len(df_search))
                             if numeric_conds:
                                 if col_ai_suggested == 'AI_Spec':
-                                     vals_extracted = df_search[col_ai_suggested].apply(extract_numbers_universal)
+                                     vals = df_search[col_ai_suggested].apply(extract_numbers_universal)
                                 else:
-                                     vals_extracted = df_search[col_ai_suggested].apply(lambda x: extract_numbers_universal(x))
-                                
-                                range_mask = vals_extracted.apply(lambda x: validate_row(x, numeric_conds))
+                                     vals = df_search[col_ai_suggested].apply(lambda x: extract_numbers_universal(x))
+                                range_mask = vals.apply(lambda x: validate_row(x, numeric_conds))
 
-                            # -------------------------------------------------
-                            # B. จัดการเงื่อนไขข้อความ -> เช็คทุกคอลัมน์ + กัน Error ช่องว่าง 🔥
-                            # -------------------------------------------------
+                            # B. กรองข้อความ (Smart Search: หาข้ามคอลัมน์)
                             choice_mask = pd.Series([True] * len(df_search))
-                            
                             if choice_conds:
-                                # เริ่มต้นถือว่าไม่เจอ (False) จนกว่าจะหาเจอ
                                 choice_mask = pd.Series([False] * len(df_search))
-                                
                                 for f in choice_conds:
-                                    # แปลงคำค้นหาเป็นตัวเล็ก + ตัดเว้นวรรค
-                                    target_val = str(f['value']).lower().strip().replace(" ", "")
+                                    t_val = str(f['value']).lower().strip().replace(" ", "")
+                                    found_any = pd.Series([False] * len(df_search))
+                                    for sc in text_search_cols:
+                                        if sc in df_search.columns:
+                                            # fillna('') สำคัญมาก เพื่อกัน error
+                                            d_clean = df_search[sc].fillna('').astype(str).str.lower().str.replace(" ", "")
+                                            found_any |= d_clean.str.contains(t_val, na=False)
                                     
-                                    # ตัวแปรเก็บผลลัพธ์ว่า "เจอในคอลัมน์ไหนก็ได้"
-                                    found_in_any_col = pd.Series([False] * len(df_search))
-                                    
-                                    for search_col in text_search_cols:
-                                        if search_col in df_search.columns:
-                                            # 🔥 จุดแก้ Error: .fillna('') คือถ้าช่องว่าง ให้เป็นข้อความเปล่า อย่าให้เป็น NaN
-                                            col_data_clean = df_search[search_col].fillna('').astype(str).str.lower().str.replace(" ", "")
-                                            
-                                            # ค้นหาคำ (na=False คือถ้าข้อมูลพัง ให้ถือว่าหาไม่เจอ แต่อย่า Error)
-                                            found_in_any_col |= col_data_clean.str.contains(target_val, na=False)
-                                    
-                                    # Logic AND: ถ้า User หาหลายคำ ต้องเจอครบทุกคำ
-                                    if f is choice_conds[0]:
-                                        choice_mask = found_in_any_col
-                                    else:
-                                        choice_mask &= found_in_any_col
-                                        
-                                    vals_log.append(f"{target_val}")
+                                    if f is choice_conds[0]: choice_mask = found_any
+                                    else: choice_mask &= found_any
+                                    vals_log.append(f"{t_val}")
 
-                            # รวมผลลัพธ์ (AND Logic ระหว่าง เลข และ ข้อความ)
                             final_mask &= (range_mask & choice_mask)
                             
-                            # Log เพื่อดูผลลัพธ์หลังบ้าน
-                            log_text = ""
-                            if numeric_conds: log_text += f"NumCheck({col_ai_suggested}) "
-                            if choice_conds:  log_text += f"TextCheck(Match '{'|'.join(vals_log)}' in {text_search_cols})"
-                            active_conds.append(log_text)
+                            if numeric_conds: active_conds.append(f"Num({col_ai_suggested})")
+                            if choice_conds:  active_conds.append(f"Text({','.join(vals_log)})")
 
-                    except Exception as e:
-                        st.error(f"Filter Logic Error: {e}")
-                    # --- จบส่วนที่ Copy ---
-                            
-                    except Exception as e: st.error(f"Error: {e}")
+                    else:
+                        # กรณี AI ไม่ตอบ JSON (Fallback) -> หาแบบธรรมดา
+                        final_mask = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
+                        active_conds.append("Keyword Search (Fallback)")
+
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาด: {e}")
+                    # ถ้า Error ให้แสดงทั้งหมดไปเลย จะได้รู้ว่าโค้ดยังวิ่งอยู่
+                    final_mask = pd.Series([True] * len(df_search))
+
+                # ---------------------------------------------------------
+                # ส่วนแสดงผล (อยู่นอก try/except เพื่อให้ทำงานเสมอ)
+                # ---------------------------------------------------------
+                results = df_search[final_mask]
+                
+                # Debug เล็กๆ: ถ้าไม่เจอ ให้บอกว่า mask เหลือ 0
+                if results.empty:
+                    st.warning(f"❌ ไม่พบสินค้าตามเงื่อนไข: {'; '.join(active_conds)}")
+                    st.caption("🔍 คำแนะนำ: ลองลดเงื่อนไข หรือใช้คำค้นหาที่กว้างขึ้น")
                 else:
-                    simple = df_search.astype(str).apply(lambda x: x.str.contains(query2, case=False)).any(axis=1)
-                    st.dataframe(df_search[simple], use_container_width=True)
+                    st.success(f"✅ พบ {len(results)} รายการ (เงื่อนไข: {'; '.join(active_conds)})")
+                    st.dataframe(
+                        results[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ราคาทุนต่อหน่วย', 'จำนวนสต้อก', 'AI_Brand', 'AI_Spec', 'AI_Kind', 'AI_Tags']],
+                        column_config={
+                            "ราคาทุนต่อหน่วย": st.column_config.NumberColumn("ราคาทุน", format="฿%d"), 
+                            "จำนวนสต้อก": st.column_config.ProgressColumn("สต้อก", format="%d", max_value=100)
+                        },
+                        use_container_width=True, hide_index=True
+                    )
