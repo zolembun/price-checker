@@ -238,20 +238,74 @@ def merge_data(df_main, df_mem):
             
     return merged
 # ---------------------------------------------------------
-# 🔥 ฟังก์ชัน AI (Force JSON + Debug)
+# ฟังก์ชันแกะข้อมูลสินค้า (สำหรับปุ่ม "สอน AI")
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ)
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# 🔥 ฟังก์ชัน AI (เวอร์ชั่นนักแกะรอยขั้นเทพ - อัปเกรด Prompt)
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# 🔥 ฟังก์ชัน AI (เวอร์ชั่นกันกระสุน - แก้ Error JSON)
-# ---------------------------------------------------------
-# ---------------------------------------------------------
-# 🔥 ฟังก์ชัน AI (เวอร์ชั่น Ultra-Safe: ไม่พังแน่นอน)
-# ---------------------------------------------------------
+def ask_gemini_extract(names):
+    # เตรียมค่า Default ไว้กัน Error
+    default_list = []
+    for _ in names:
+        default_list.append({
+            "AI_Brand": "Unknown", "AI_Type": "Other", 
+            "AI_Kind": "", "AI_Spec": "-", "AI_Tags": ""
+        })
+
+    if not names: return []
+
+    # Prompt สั่งงาน
+    prompt = f"""
+    Extract product info from this list:
+    {json.dumps(names, ensure_ascii=False)}
+
+    Return JSON Array with these keys:
+    - AI_Brand
+    - AI_Type (Category in Thai)
+    - AI_Kind (Sub-type in Thai e.g. 1 ประตู, ฝาบน. If unknown use "")
+    - AI_Spec (Capacity/Size)
+    - AI_Tags
+
+    Response Format: JSON Array ONLY. No Markdown.
+    """
+    
+    try:
+        # เรียก AI
+        response = ai_model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
+        
+        txt = response.text.strip()
+        
+        # ล้าง Markdown ออก (ถ้ามี)
+        txt_clean = re.sub(r"```json|```", "", txt).strip()
+        
+        try:
+            data = json.loads(txt_clean)
+        except json.JSONDecodeError:
+            return default_list
+
+        # จัดระเบียบข้อมูล
+        normalized_data = []
+        for item in data:
+            new_item = {
+                "AI_Brand": item.get("AI_Brand") or "Unknown",
+                "AI_Type": item.get("AI_Type") or "Other",
+                "AI_Kind": item.get("AI_Kind") or "", 
+                "AI_Spec": item.get("AI_Spec") or "-",
+                "AI_Tags": item.get("AI_Tags") or ""
+            }
+            # แปลง Tags เป็น String ถ้ามันมาเป็น List
+            if isinstance(new_item["AI_Tags"], list):
+                new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
+                
+            normalized_data.append(new_item)
+            
+        return normalized_data
+
+    except Exception as e:
+        print(f"Extract Error: {e}")
+        return default_list
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (โหมด DEBUG: แสดง Error ให้เห็นจะๆ)
 # ---------------------------------------------------------
