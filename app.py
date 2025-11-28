@@ -689,16 +689,19 @@ with tab2:
                                     if op == 'lte' and not (num <= limit): return False
                                 return True
 
-                        # --- เริ่มวนลูปกรอง (Logic เดิมที่ถูกต้อง) ---
+                       # --- เริ่มวางตรงนี้ (ต่อจาก return True ของ validate_row) ---
+
+                        # --- เริ่มวนลูปกรอง (Logic ใหม่: แยก Range=AND, Text=OR) ---
                         for col_ai_suggested, conditions in grouped_filters.items():
                             if col_ai_suggested not in df_search.columns: continue
 
+                            # 1. แยกประเภทเงื่อนไข
                             numeric_conds = [f for f in conditions if f['operator'] in ['gt', 'gte', 'lt', 'lte']]
                             choice_conds = [f for f in conditions if f['operator'] not in ['gt', 'gte', 'lt', 'lte']]
                             
                             vals_log = [] 
 
-                            # A. กรองตัวเลข
+                            # A. กรองตัวเลขช่วง (AND)
                             range_mask = pd.Series([True] * len(df_search))
                             if numeric_conds:
                                 if col_ai_suggested == 'AI_Spec':
@@ -707,7 +710,7 @@ with tab2:
                                      vals = df_search[col_ai_suggested].apply(lambda x: extract_numbers_universal(x))
                                 range_mask = vals.apply(lambda x: validate_row(x, numeric_conds))
 
-                            # B. กรองข้อความ (Smart Search: หาข้ามคอลัมน์)
+                            # B. กรองข้อความ/ยี่ห้อ (OR)
                             choice_mask = pd.Series([True] * len(df_search))
                             if choice_conds:
                                 choice_mask = pd.Series([False] * len(df_search))
@@ -716,18 +719,18 @@ with tab2:
                                     found_any = pd.Series([False] * len(df_search))
                                     for sc in text_search_cols:
                                         if sc in df_search.columns:
-                                            # fillna('') สำคัญมาก เพื่อกัน error
                                             d_clean = df_search[sc].fillna('').astype(str).str.lower().str.replace(" ", "")
                                             found_any |= d_clean.str.contains(t_val, na=False)
-                                    
-                                    if f is choice_conds[0]: choice_mask = found_any
-                                    else: choice_mask &= found_any
+                                    choice_mask |= found_any
                                     vals_log.append(f"{t_val}")
 
+                            # รวมผลลัพธ์สุดท้าย
                             final_mask &= (range_mask & choice_mask)
                             
-                            if numeric_conds: active_conds.append(f"Num({col_ai_suggested})")
+                            if numeric_conds: active_conds.append(f"Range({col_ai_suggested})")
                             if choice_conds:  active_conds.append(f"Text({','.join(vals_log)})")
+                        
+                        # --- จบการวางตรงนี้ (บรรทัดต่อไปต้องเป็น else:) ---
 
                     else:
                         # กรณี AI ไม่ตอบ JSON (Fallback) -> หาแบบธรรมดา
