@@ -356,6 +356,10 @@ def ask_gemini_filter(query, columns, df_lookup=None):
     1. **Context Mapping (สำคัญที่สุด)**: 
        - ก่อนจะตัดสินใจ ให้ดูใน [Database Context] ด้านบนก่อน
        - ถ้าคำค้นหาตรงกับ Known Brands/Types ให้ใช้คำนั้นเป๊ะๆ (เช่น User พิมพ์ "Mitsu" -> ต้องแก้เป็น "MITSUBISHI" ตามในลิสต์)
+       - **Thai Splitting Rule (เพิ่ม)**: ถ้าเจอชื่อแบรนด์ภาษาไทยหลายคำเว้นวรรค (เช่น "ไฮเออร์ แอลจี") **ต้องแยก (SPLIT)** เป็น Filter หลายตัว
+         * ตัวอย่าง: "ไฮเออร์ แอลจี" -> ให้สร้าง 2 filters:
+           {{ "column": "AI_Brand", "operator": "contains", "value": "HAIER" }},
+           {{ "column": "AI_Brand", "operator": "contains", "value": "LG" }}
 
     2. **Price & Spec Logic**: 
        - ถ้าเจอตัวเลขราคา ให้ใช้ 'lte' (ไม่เกิน) หรือ 'gte' (ตั้งแต่)
