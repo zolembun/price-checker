@@ -240,8 +240,11 @@ def merge_data(df_main, df_mem):
 # ---------------------------------------------------------
 # ฟังก์ชันแกะข้อมูลสินค้า (สำหรับปุ่ม "สอน AI")
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# ฟังก์ชันแกะข้อมูลสินค้า (ฉบับเสถียร: Retry 3 ครั้ง + พักนานขึ้น)
+# ---------------------------------------------------------
 def ask_gemini_extract(names):
-    # เตรียมค่า Default ไว้กัน Error
+    # ค่า Default กรณีพังจริงๆ
     default_list = []
     for _ in names:
         default_list.append({
@@ -251,61 +254,67 @@ def ask_gemini_extract(names):
 
     if not names: return []
 
-    # Prompt สั่งงาน
     prompt = f"""
     Extract product info from this list:
     {json.dumps(names, ensure_ascii=False)}
 
     Return JSON Array with these keys:
-    - AI_Brand
-    - AI_Type (Category in Thai)
-    - AI_Kind (Sub-type in Thai e.g. 1 ประตู, ฝาบน. If unknown use "")
-    - AI_Spec (Capacity/Size)
-    - AI_Tags
+    - AI_Brand (Use Uppercase e.g. SAMSUNG)
+    - AI_Type (Category in Thai e.g. เครื่องซักผ้า, ทีวี)
+    - AI_Kind (Sub-type in Thai e.g. ฝาบน, 2 ถัง. If unknown use "")
+    - AI_Spec (Capacity/Size e.g. 10 kg, 55 นิ้ว)
+    - AI_Tags (Features e.g. inverter, smart tv)
 
     Response Format: JSON Array ONLY. No Markdown.
     """
     
-    try:
-        # เรียก AI
-        response = ai_model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json"
-            )
-        )
-        
-        txt = response.text.strip()
-        
-        # ล้าง Markdown ออก (ถ้ามี)
-        txt_clean = re.sub(r"```json|```", "", txt).strip()
-        
+    # 🔥 ระบบตื้อ 3 รอบ (Retry Logic) 🔥
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            data = json.loads(txt_clean)
-        except json.JSONDecodeError:
-            return default_list
-
-        # จัดระเบียบข้อมูล
-        normalized_data = []
-        for item in data:
-            new_item = {
-                "AI_Brand": item.get("AI_Brand") or "Unknown",
-                "AI_Type": item.get("AI_Type") or "Other",
-                "AI_Kind": item.get("AI_Kind") or "", 
-                "AI_Spec": item.get("AI_Spec") or "-",
-                "AI_Tags": item.get("AI_Tags") or ""
-            }
-            # แปลง Tags เป็น String ถ้ามันมาเป็น List
-            if isinstance(new_item["AI_Tags"], list):
-                new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
-                
-            normalized_data.append(new_item)
+            # เรียก AI
+            response = ai_model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
             
-        return normalized_data
+            txt = response.text.strip()
+            # ล้าง Markdown
+            txt_clean = re.sub(r"```json|```", "", txt).strip()
+            
+            data = json.loads(txt_clean)
 
-    except Exception as e:
-        print(f"Extract Error: {e}")
-        return default_list
+            # เช็คความถูกต้องของข้อมูล
+            normalized_data = []
+            for item in data:
+                new_item = {
+                    "AI_Brand": item.get("AI_Brand") or "Unknown",
+                    "AI_Type": item.get("AI_Type") or "Other",
+                    "AI_Kind": item.get("AI_Kind") or "", 
+                    "AI_Spec": item.get("AI_Spec") or "-",
+                    "AI_Tags": item.get("AI_Tags") or ""
+                }
+                if isinstance(new_item["AI_Tags"], list):
+                    new_item["AI_Tags"] = ", ".join(new_item["AI_Tags"])
+                normalized_data.append(new_item)
+            
+            # ถ้าจำนวนข้อมูลไม่ครบ (เช่นส่งไป 10 กลับมา 5) ให้ถือว่า Error แล้วลองใหม่
+            if len(normalized_data) != len(names):
+                print(f"⚠️ จำนวนไม่ครบ ({len(normalized_data)}/{len(names)}) ลองใหม่...")
+                raise ValueError("Data mismatch")
+                
+            return normalized_data # สำเร็จ! ส่งค่ากลับเลย
+
+        except Exception as e:
+            # สูตรคำนวณเวลารอ: รอบ 1=5วิ, รอบ 2=10วิ, รอบ 3=15วิ
+            wait_time = (attempt + 1) * 5 
+            print(f"⚠️ AI Error (รอบ {attempt+1}): {e} ... รอ {wait_time} วินาที")
+            time.sleep(wait_time)
+    
+    # ถ้าครบ 3 รอบแล้วยังไม่ได้จริงๆ ค่อยยอมแพ้
+    return default_list
 # ---------------------------------------------------------
 # 🔥 ฟังก์ชัน AI (โหมด DEBUG: แสดง Error ให้เห็นจะๆ)
 # ---------------------------------------------------------
@@ -508,64 +517,68 @@ with tab2:
         c_a1.write(f"สินค้าใหม่ที่ AI ยังไม่รู้จัก: **{new_count}** รายการ")
         
         # ปุ่มสอน AI
+        # ปุ่มสอน AI
         if new_count > 0:
             if c_a2.button("🚀 สอน AI เดี๋ยวนี้", type="primary"):
-                with st.status("🤖 AI กำลังเรียนรู้...", expanded=True) as status:
+                with st.status("🤖 AI กำลังทำงาน...", expanded=True) as status:
                     
-                    # 1. เช็คคอลัมน์ชนิด (ถ้าไม่มีสร้างใหม่)
-                    if 'ชนิด' not in new_items_df.columns:
+                    # 1. เตรียมข้อมูล
+                    if 'ชนิด' not in new_items_df.columns: 
                         new_items_df['ชนิด'] = ''
-                        
-                    # 2. เตรียมข้อมูล (ชื่อ + ชนิดเดิม)
+                    
                     to_proc = new_items_df[['รหัสสินค้า', 'รายละเอียดสินค้า', 'ชนิด']].rename(
                         columns={'รหัสสินค้า':'SKU', 'รายละเอียดสินค้า':'Name', 'ชนิด':'Original_Kind'}
                     ).to_dict('records')
 
-                    BATCH = 30
-                    res_save = []
+                    # ✅ สูตรเสถียร: Batch 10
+                    BATCH = 10
                     total_batches = (len(to_proc) // BATCH) + 1
                     
+                    # 2. เริ่มวนลูป
                     for i in range(0, len(to_proc), BATCH):
                         chunk = to_proc[i:i+BATCH]
-                        status.write(f"Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
+                        status.write(f"⏳ กำลังประมวลผล Batch {(i//BATCH)+1}/{total_batches} ({len(chunk)} รายการ)...")
                         
-                        # รวมชื่อ + ชนิด ส่งให้ AI
-                       # --- ✂️ เริ่มแก้จุดที่ 1 (เตรียมข้อมูล) ---
                         # รวมชื่อส่ง AI
                         names_for_ai = [f"{x['Name']} {x['Original_Kind']}" for x in chunk]
+                        
+                        # เรียก AI (ตัว Retry 3 รอบ)
                         ai_res = ask_gemini_extract(names_for_ai)
                         
-                        # เตรียมข้อมูลลงชีท (🔥 แก้ตรงนี้: ใส่ str() ครอบทุกตัว กัน Google Sheet ปฏิเสธ)
+                        # เตรียมข้อมูล (บังคับ String)
                         res_save = []
                         for idx, item in enumerate(chunk):
                             ar = ai_res[idx] if idx < len(ai_res) else {}
                             res_save.append([
-                                str(item['SKU']).strip(),           # ต้องมี str()
-                                str(ar.get('AI_Brand','Unknown')),  # ต้องมี str()
+                                str(item['SKU']).strip(),
+                                str(ar.get('AI_Brand','Unknown')),
                                 str(ar.get('AI_Type','Other')),
                                 str(ar.get('AI_Spec','-')),
                                 str(ar.get('AI_Tags','')),
                                 str(ar.get('AI_Kind',''))
                             ])
-                        # --- ✂️ จบจุดที่ 1 ---
-                    
-                # --- ✂️ เริ่มแก้จุดที่ 2 (บันทึกและล้าง Cache) ---
+                        
+                        # 3. บันทึกและล้าง Cache ทันที
                         if res_save:
                             try:
                                 result = append_to_sheet(res_save)
                                 if result:
                                     status.write(f"✅ บันทึก Batch {(i//BATCH)+1} สำเร็จ!")
-                                    # 🔥 เพิ่มบรรทัดนี้: เพื่อให้มั่นใจว่าครั้งหน้าโหลดมาจะเจอข้อมูลใหม่แน่นอน
-                                    st.cache_data.clear() 
+                                    st.cache_data.clear() # ล้างความจำทันทีที่บันทึกได้
                                 else:
-                                    status.error("❌ บันทึกไม่สำเร็จ (ตรวจสอบสิทธิ์ Sheet)")
+                                    status.error("❌ บันทึกไม่สำเร็จ (Google Sheet Error)")
+                                    time.sleep(5) # พักยาวหน่อยถ้า Error
                             except Exception as e:
                                 status.error(f"❌ Error: {e}")
                         
-                        time.sleep(1) # พักนิดนึง
-                        # --- ✂️ จบจุดที่ 2 ---
-                        time.sleep(1)
-                        st.rerun()
+                        # ✅ พัก 3 วินาที (สูตรเสถียร)
+                        time.sleep(3)
+
+                    # 4. จบการทำงาน (อยู่นอกลูป)
+                    status.update(label="🎉 เสร็จสิ้นภารกิจ!", state="complete")
+                    st.success("บันทึกข้อมูลเรียบร้อย! กำลังรีโหลด...")
+                    time.sleep(2)
+                    st.rerun()
         else:
             c_a2.button("🔄 รีโหลด", on_click=lambda: st.cache_data.clear())
 
