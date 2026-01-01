@@ -615,7 +615,7 @@ with tab1:
             cols = st.columns(2)
             # ...
                 
-                cols = st.columns(2)
+            cols = st.columns(2)
                 for i, s in enumerate(stores):
                     with cols[i%2]: st.link_button(f"🔍 {s['name']}", s['url'], use_container_width=True)
         else:
