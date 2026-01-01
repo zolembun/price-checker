@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 import json
 import time
+import streamlit.components.v1 as components
 
 # ---------------------------------------------------------
 # 1. ตั้งค่าหน้าเว็บ (บรรทัดแรกสุด ห้ามย้าย)
@@ -505,18 +506,30 @@ with tab1:
                 </div>
                 """, unsafe_allow_html=True)
 
+           # ... (โค้ดส่วนแสดงกล่อง 3 กล่อง: ทุน/ขาย/สต้อก อยู่ด้านบนเหมือนเดิม) ...
+
             # -------------------------------------------------------
-            # ✨ [เพิ่มใหม่] เอาข้อมูลรหัส/ยี่ห้อ มาทำเป็นแถบสวยๆ ด้านล่างแทน
+            # ✨ [แก้ไข] 1. แถบโชว์รหัสและยี่ห้อ (เอาลิงก์ Google ออกไปแล้ว)
             # -------------------------------------------------------
             st.markdown(f"""
             <div class="detail-bar">
                 <b>🆔 รหัส:</b> {mid} &nbsp;&nbsp;|&nbsp;&nbsp; 
-                <b>🏷️ ยี่ห้อ:</b> {brand} &nbsp;&nbsp;|&nbsp;&nbsp; 
-                <a href="https://www.google.com/search?q={urllib.parse.quote(name)}" target="_blank" style="text-decoration:none;">
-                    🌐 ค้นรูปใน Google
-                </a>
+                <b>🏷️ ยี่ห้อ:</b> {brand}
             </div>
             """, unsafe_allow_html=True)
+
+            # -------------------------------------------------------
+            # ✨ [เพิ่มใหม่] 2. ปุ่มค้นหา Google แยกออกมาต่างหาก (กดง่ายขึ้น)
+            # -------------------------------------------------------
+            st.write("") # เว้นช่องว่างนิดนึง
+            google_q = urllib.parse.quote(name)
+            st.link_button(
+                "🌐 ค้นหารูป/ข้อมูลเพิ่มเติมใน Google", 
+                f"https://www.google.com/search?q={google_q}", 
+                use_container_width=True  # ให้ปุ่มกว้างเต็มจอ
+            )
+            
+            # ... (หลังจากนี้เป็นเส้นกั้น st.divider() และตาราง Margin เหมือนเดิม) ...
 
             st.divider()
             with st.expander("ดูตาราง Margin (3% - 30%)", expanded=True):
@@ -542,37 +555,65 @@ with tab1:
                     {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={enc}"},
                     {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"}
                 ]
-                # --- ✨ ส่วนที่เพิ่มมาใหม่ (เริ่ม) ✨ ---
-                js_code = ""
-                for s in stores:
-                    js_code += f"window.open('{s['url']}', '_blank'); "
+               # ... (โค้ดส่วน stores = [...] เหมือนเดิม) ...
 
-                st.markdown(f"""
-                <style>
-                    .mobile-launch-btn {{
-                        background: linear-gradient(90deg, #ff4b4b 0%, #ff0000 100%);
-                        color: white; border: none; padding: 15px 20px; 
-                        border-radius: 12px; font-weight: bold; font-size: 16px;
-                        cursor: pointer; width: 100%; margin-bottom: 15px;
-                        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-                        touch-action: manipulation;
-                    }}
-                    .mobile-launch-btn:active {{ transform: scale(0.98); background: #d60000; }}
-                    .ios-warning {{
-                        background-color: #fff3cd; border: 1px solid #ffeeba;
-                        color: #856404; padding: 10px; border-radius: 8px;
-                        font-size: 0.85em; margin-bottom: 15px;
-                    }}
-                </style>
-                <div class="ios-warning">
-                    📱 <b>iPhone/iPad:</b> หากเปิดไม่ครบ ให้ไปที่ 
-                    <b>Settings > Safari > ปิด Block Pop-ups</b>
+            # -------------------------------------------------------
+            # ✅ แก้ไขใหม่: ใช้ components.html เพื่อเลี่ยง Error ของ React
+            # -------------------------------------------------------
+            
+            # 1. เตรียม Script เปิดลิ้งค์
+            js_items = [f"window.open('{s['url']}', '_blank');" for s in stores]
+            js_command = "".join(js_items)
+
+            # 2. เขียน HTML + CSS + JS รวมกันในก้อนเดียว
+            html_button = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <style>
+                body {{ margin: 0; padding: 0; font-family: sans-serif; }}
+                .mobile-launch-btn {{
+                    background: linear-gradient(90deg, #ff4b4b 0%, #ff0000 100%);
+                    color: white; 
+                    border: none; 
+                    padding: 15px 20px; 
+                    border-radius: 12px; 
+                    font-weight: bold; 
+                    font-size: 16px;
+                    cursor: pointer; 
+                    width: 100%; 
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                    touch-action: manipulation;
+                    display: block;
+                }}
+                .mobile-launch-btn:active {{ transform: scale(0.98); background: #d60000; }}
+                .warning-text {{
+                    font-size: 12px; color: #856404; background-color: #fff3cd;
+                    padding: 8px; border-radius: 6px; margin-bottom: 8px;
+                    border: 1px solid #ffeeba; text-align: center;
+                }}
+            </style>
+            </head>
+            <body>
+                <div class="warning-text">
+                    📱 <b>iPhone:</b> ต้องปิด Block Pop-ups ใน Settings > Safari ก่อน
                 </div>
-                <button class="mobile-launch-btn" onclick="{js_code}">
+                
+                <button class="mobile-launch-btn" onclick="{js_command}">
                     🚀 เปิด 9 แอปเทียบราคา (กดทีเดียว)
                 </button>
-                """, unsafe_allow_html=True)
-                # --- ✨ ส่วนที่เพิ่มมาใหม่ (จบ) ✨ ---
+            </body>
+            </html>
+            """
+
+            # 3. แสดงผลด้วย components.html (กำหนดความสูงให้พอดีกับปุ่ม)
+            components.html(html_button, height=110)
+
+            # -------------------------------------------------------
+            # จบส่วนแก้ไข (ปุ่มย่อยด้านล่างปล่อยไว้เหมือนเดิม)
+            # -------------------------------------------------------
+            cols = st.columns(2)
+            # ...
                 
                 cols = st.columns(2)
                 for i, s in enumerate(stores):
