@@ -458,7 +458,7 @@ with tab1:
                         found_by = "🤖 AI ค้นพบ"
                     except: match_index = -1
 
-       if match_index != -1 and match_index in df_main.index:
+        if match_index != -1 and match_index in df_main.index:
             item = df_main.loc[match_index]
             cost = item.get('ราคาทุนต่อหน่วย', 0)
             stock = item.get('จำนวนสต้อก', 0)
