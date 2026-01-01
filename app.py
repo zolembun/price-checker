@@ -72,6 +72,17 @@ st.markdown("""
     
     /* Status Widget */
     .stStatusWidget { border-radius: 10px; }
+    .stock-box { 
+        background-color: #e3f2fd; padding: 15px; border-radius: 10px; 
+        border: 2px solid #2196f3; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .price-value-stock { font-size: 42px !important; font-weight: 900; color: #1565c0; line-height: 1.2;}
+
+    /* ปรับปรุงกล่อง Info ด้านล่างให้เรียบร้อยขึ้น */
+    .detail-bar {
+        margin-top: 10px; padding: 10px; background-color: #f1f3f4; 
+        border-radius: 8px; text-align: center; font-size: 14px; color: #333;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -447,7 +458,7 @@ with tab1:
                         found_by = "🤖 AI ค้นพบ"
                     except: match_index = -1
 
-        if match_index != -1 and match_index in df_main.index:
+       if match_index != -1 and match_index in df_main.index:
             item = df_main.loc[match_index]
             cost = item.get('ราคาทุนต่อหน่วย', 0)
             stock = item.get('จำนวนสต้อก', 0)
@@ -461,17 +472,51 @@ with tab1:
             sell_price = cost * (1 + (target_margin/100))
             profit = sell_price - cost
 
-            c1, c2, c3 = st.columns([1.3, 1.3, 1])
+            # -------------------------------------------------------
+            # ✨ [แก้ไขใหม่] แบ่งเป็น 3 คอลัมน์เท่ากัน (ทุน | ขาย | สต้อก)
+            # -------------------------------------------------------
+            c1, c2, c3 = st.columns([1, 1, 1]) 
+            
             with c1:
-                st.markdown(f"""<div class="cost-box"><div style="color:#555;font-weight:bold;">🔴 ราคาทุน</div><div class="price-value-cost">{cost:,.0f}</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class="cost-box">
+                    <div style="color:#555;font-weight:bold;">🔴 ราคาทุน</div>
+                    <div class="price-value-cost">{cost:,.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
             with c2:
-                st.markdown(f"""<div class="selling-box"><div style="color:#555;font-weight:bold;">🟢 ขายแนะนำ (+{target_margin}%)</div><div class="price-value-sell">{sell_price:,.0f}</div><div style="color:#1b5e20;">กำไร {profit:,.0f} บาท</div></div>""", unsafe_allow_html=True)
-            with c3:
-                st.markdown(f"""<div class="info-box"><b>🆔 รหัส:</b> {mid}<br><b>📦 สต้อก:</b> {stock}<br><b>🏷️ ยี่ห้อ:</b> {brand}</div>""", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class="selling-box">
+                    <div style="color:#555;font-weight:bold;">🟢 ราคาขาย (+{target_margin}%)</div>
+                    <div class="price-value-sell">{sell_price:,.0f}</div>
+                    <div style="font-size:12px; color:#2e7d32;">(กำไร {profit:,.0f} บ.)</div>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                st.write("")
-                g_q = urllib.parse.quote(name)
-                st.link_button("🌐 ค้นหารูป/ข้อมูลใน Google", f"https://www.google.com/search?q={g_q}", use_container_width=True)
+            with c3:
+                # ตกแต่ง: ถ้าสต้อกเป็น 0 ให้เลขเป็นสีแดง, ถ้ามีของให้เป็นสีฟ้า
+                stock_color = "#c62828" if stock == 0 else "#1565c0"
+                st.markdown(f"""
+                <div class="stock-box">
+                    <div style="color:#555;font-weight:bold;">📦 สต้อกคงเหลือ</div>
+                    <div class="price-value-stock" style="color: {stock_color};">{stock:,.0f}</div>
+                    <div style="font-size:12px; color:#555;">หน่วย</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # -------------------------------------------------------
+            # ✨ [เพิ่มใหม่] เอาข้อมูลรหัส/ยี่ห้อ มาทำเป็นแถบสวยๆ ด้านล่างแทน
+            # -------------------------------------------------------
+            st.markdown(f"""
+            <div class="detail-bar">
+                <b>🆔 รหัส:</b> {mid} &nbsp;&nbsp;|&nbsp;&nbsp; 
+                <b>🏷️ ยี่ห้อ:</b> {brand} &nbsp;&nbsp;|&nbsp;&nbsp; 
+                <a href="https://www.google.com/search?q={urllib.parse.quote(name)}" target="_blank" style="text-decoration:none;">
+                    🌐 ค้นรูปใน Google
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
 
             st.divider()
             with st.expander("ดูตาราง Margin (3% - 30%)", expanded=True):
