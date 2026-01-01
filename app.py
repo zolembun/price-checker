@@ -497,6 +497,37 @@ with tab1:
                     {"name": "Makro", "url": f"https://www.makro.pro/c/search?q={enc}"},
                     {"name": "Dohome", "url": f"https://www.dohome.co.th/search?q={enc}"}
                 ]
+                # --- ✨ ส่วนที่เพิ่มมาใหม่ (เริ่ม) ✨ ---
+                js_code = ""
+                for s in stores:
+                    js_code += f"window.open('{s['url']}', '_blank'); "
+
+                st.markdown(f"""
+                <style>
+                    .mobile-launch-btn {{
+                        background: linear-gradient(90deg, #ff4b4b 0%, #ff0000 100%);
+                        color: white; border: none; padding: 15px 20px; 
+                        border-radius: 12px; font-weight: bold; font-size: 16px;
+                        cursor: pointer; width: 100%; margin-bottom: 15px;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+                        touch-action: manipulation;
+                    }}
+                    .mobile-launch-btn:active {{ transform: scale(0.98); background: #d60000; }}
+                    .ios-warning {{
+                        background-color: #fff3cd; border: 1px solid #ffeeba;
+                        color: #856404; padding: 10px; border-radius: 8px;
+                        font-size: 0.85em; margin-bottom: 15px;
+                    }}
+                </style>
+                <div class="ios-warning">
+                    📱 <b>iPhone/iPad:</b> หากเปิดไม่ครบ ให้ไปที่ 
+                    <b>Settings > Safari > ปิด Block Pop-ups</b>
+                </div>
+                <button class="mobile-launch-btn" onclick="{js_code}">
+                    🚀 เปิด 9 แอปเทียบราคา (กดทีเดียว)
+                </button>
+                """, unsafe_allow_html=True)
+                # --- ✨ ส่วนที่เพิ่มมาใหม่ (จบ) ✨ ---
                 
                 cols = st.columns(2)
                 for i, s in enumerate(stores):
