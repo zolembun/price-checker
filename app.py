@@ -627,6 +627,11 @@ with tab1:
 with tab2:
     st.info("💡 เหมาะสำหรับ: ค้นหาแบบประโยค เช่น 'ทีวี Samsung ไม่เกินหมื่น', 'แอร์ inverter'")
     
+    # 🌟 เพิ่มโค้ดดัก Error ตรงนี้
+    if df_main.empty or 'รหัสสินค้า' not in df_main.columns:
+        st.warning("⚠️ ข้อมูลโหลดไม่สมบูรณ์ (อาจเกิดจากอินเทอร์เน็ตหรือ Google API) กรุณากดปุ่มรีโหลดข้อมูลด้านล่าง")
+        st.stop() # หยุดการทำงานชั่วคราว ไม่ให้แอปพัง
+    
     # คำนวณสินค้าใหม่
     processed_skus = df_mem['SKU'].astype(str).str.strip().tolist() if not df_mem.empty else []
     new_items_df = df_main[~df_main['รหัสสินค้า'].astype(str).str.strip().isin(processed_skus)]
@@ -771,7 +776,7 @@ with tab2:
                         sort_order = result_json.get('sort_order')
                         
                         # กำหนดคอลัมน์ที่จะค้นหาข้อความ
-                        text_search_cols = ['AI_Type', 'AI_Kind', 'AI_Tags', 'AI_Brand', 'รายละเอียดสินค้า']
+                        text_search_cols = ['AI_Type', 'AI_Kind', 'AI_Tags', 'AI_Brand', 'รายละเอียดสินค้า', 'AI_Spec']
                         
                         from collections import defaultdict
                         grouped_filters = defaultdict(list)
