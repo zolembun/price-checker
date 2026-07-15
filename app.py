@@ -108,7 +108,7 @@ def init_services():
         
         # 🔥 แก้ไขจุดที่ Error: เปลี่ยนชื่อโมเดลเป็นรุ่น Latest
         try:
-            model = genai.GenerativeModel('models/gemini-2.0-flash')
+            model = genai.GenerativeModel('models/gemini-2-flash')
         except:
             # Fallback ถ้า latest ใช้ไม่ได้ ให้ลองตัวธรรมดาหรือ Pro
             model = genai.GenerativeModel('models/gemini-2.5-flash')
