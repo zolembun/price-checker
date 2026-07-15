@@ -182,7 +182,10 @@ def load_data_master():
         return df_main, df_mem, file_name, last_update
 
     except Exception as e:
-        st.error(f"Load Data Error: {e}")
+        # 👇 โค้ดส่วนนี้จะดึง Error ของ Google API มาโชว์ให้คุณเห็นชัดๆ บนหน้าเว็บ
+        st.error(f"🛑 ข้อมูลจาก Google API ขัดข้อง:")
+        st.code(str(e)) 
+        
         return pd.DataFrame(), pd.DataFrame(), "Error", "-"
 
 def append_to_sheet(data_values):
