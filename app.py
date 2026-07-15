@@ -400,9 +400,29 @@ def ask_gemini_filter(query, columns, df_lookup=None):
     """
     
     try:
-        res = ai_model.generate_content(prompt, generation_config=genai.types.GenerationConfig(response_mime_type="application/json"))
-        return json.loads(res.text.strip())
-    except: return None
+        # สั่งให้ AI ตอบกลับมา
+        res = ai_model.generate_content(
+            prompt, 
+            generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
+        )
+        
+        # 🧹 ดักจับปัญหา AI ชอบพิมพ์ Markdown (```json) ติดมาด้วย
+        import re
+        txt_clean = res.text.strip()
+        txt_clean = re.sub(r"```json|```", "", txt_clean).strip()
+        
+        import json
+        return json.loads(txt_clean)
+        
+    except Exception as e:
+        # 🚨 โค้ดแฉ AI: ถ้ามันพัง มันจะฟ้องหน้าเว็บเลยว่าเพราะอะไร!
+        import streamlit as st
+        st.error(f"🛑 เกิดข้อผิดพลาดตอนคุยกับ AI: {e}")
+        try:
+            st.code(f"ข้อความที่ AI พยายามจะตอบ:\n{res.text}")
+        except:
+            pass
+        return None
 def clean_text(text):
     # 👇 ต้องมีการเว้นวรรค (Indentation) ตรงนี้
     if not text: return ""
