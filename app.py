@@ -108,10 +108,10 @@ def init_services():
         
         # 🔥 แก้ไขจุดที่ Error: เปลี่ยนชื่อโมเดลเป็นรุ่น Latest
         try:
-            model = genai.GenerativeModel('Gemini 2 Flash')
+            model = genai.GenerativeModel('Gemini-2-Flash')
         except:
             # Fallback ถ้า latest ใช้ไม่ได้ ให้ลองตัวธรรมดาหรือ Pro
-            model = genai.GenerativeModel('Gemini 2.5 Flash')
+            model = genai.GenerativeModel('Gemini-2.5-Flash')
         
         return sheets_service, drive_service, model
     except Exception as e:
@@ -411,6 +411,18 @@ def clean_text(text):
 # โหลดข้อมูล
 df_main, df_mem, file_name, last_update = load_data_master()
 
+# 👇👇👇 เพิ่มโค้ดดัก Error ขั้นสูงสุดตรงนี้ (ต้องอยู่ก่อน st.title) 👇👇👇
+if df_main.empty or 'รหัสสินค้า' not in df_main.columns:
+    st.error("🚨 ระบบโหลดข้อมูลไม่สมบูรณ์ (ตารางว่างเปล่า หรือหาหัวข้อ 'รหัสสินค้า' ไม่เจอ)")
+    st.info("💡 สาเหตุที่เป็นไปได้:\n1. ดึงข้อมูลจาก Google Sheets ไม่สำเร็จ (เน็ตกระตุก / API เต็ม)\n2. มีคนไปเปลี่ยนชื่อหัวคอลัมน์ A ในชีต (ห้ามมีช่องว่างซ่อนอยู่นะครับ)")
+    
+    if st.button("🔄 ล้างความจำและโหลดใหม่", type="primary"):
+        st.cache_data.clear() # สั่งล้างหน่วยความจำให้หมด
+        st.rerun() # สั่งแอปเริ่มใหม่
+        
+    st.stop() # 🛑 หยุดการทำงานทั้งหมดตรงนี้ ป้องกันไม่ให้แอปทะลุไปพังที่ TAB 1 หรือ 2
+# 👆👆👆 จบส่วนดัก Error 👆👆👆
+
 st.title("💰 ระบบเช็คราคาสินค้า & AI")
 st.caption(f"📂 ฐานข้อมูล: {file_name} | 🕒 อัปเดตล่าสุด: {last_update}")
 
@@ -626,17 +638,6 @@ with tab1:
 # =========================================================
 with tab2:
     st.info("💡 เหมาะสำหรับ: ค้นหาแบบประโยค เช่น 'ทีวี Samsung ไม่เกินหมื่น', 'แอร์ inverter'")
-    
-    # 🌟 เพิ่มโค้ดดัก Error และปุ่มรีโหลด
-    if df_main.empty or 'รหัสสินค้า' not in df_main.columns:
-        st.warning("⚠️ ข้อมูลโหลดไม่สมบูรณ์ (อาจเกิดจากอินเทอร์เน็ตหรือ Google API)")
-        
-        # เพิ่มปุ่มรีโหลดข้อมูลตรงนี้
-        if st.button("🔄 โหลดข้อมูลใหม่อีกครั้ง", type="primary"):
-            st.cache_data.clear() # สั่งล้างหน่วยความจำที่จำตารางเปล่าไว้
-            st.rerun() # สั่งให้แอปรันตัวเองใหม่เพื่อดึงข้อมูลอีกรอบ
-            
-        st.stop() # หยุดการทำงานชั่วคราว ไม่ให้แอปพังรันไปข้างล่าง
     
     # คำนวณสินค้าใหม่
     processed_skus = df_mem['SKU'].astype(str).str.strip().tolist() if not df_mem.empty else []
