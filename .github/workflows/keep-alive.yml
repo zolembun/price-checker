@@ -1,0 +1,19 @@
+name: Keep Streamlit App Alive
+
+on:
+  schedule:
+    # ตั้งเวลาให้ทำงานทุกๆ 12 ชั่วโมง
+    - cron: "0 */12 * * *"
+  # อนุญาตให้กดปุ่มสั่งงานเองได้
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit App
+        # 👇 เปลี่ยนลิงก์ตรงนี้ให้เป็นลิงก์แอปของคุณครับ
+        run: curl -sSf https://price-checker-c9jbnjxesxzdp8jkujfrjl.streamlit.app/ > /dev/null
+        
+      - name: Print Success
+        run: echo "✅ เคาะประตูเรียก Streamlit สำเร็จแล้ว!"
