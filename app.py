@@ -108,10 +108,10 @@ def init_services():
         
         # 🔥 แก้ไขจุดที่ Error: เปลี่ยนชื่อโมเดลเป็นรุ่น Latest
         try:
-            model = genai.GenerativeModel('Gemini-2.5-Flash')
+            model = genai.GenerativeModel('models/gemini-2.0-flash')
         except:
             # Fallback ถ้า latest ใช้ไม่ได้ ให้ลองตัวธรรมดาหรือ Pro
-            model = genai.GenerativeModel('Gemini-2.5-Flash')
+            model = genai.GenerativeModel('models/gemini-2.5-flash')
         
         return sheets_service, drive_service, model
     except Exception as e:
