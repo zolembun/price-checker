@@ -18,22 +18,63 @@ st.set_page_config(page_title="ระบบเช็คราคา & AI", page_
 # ---------------------------------------------------------
 # 2. ระบบ Login
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 2. ระบบ Login (ฉบับอัปเกรดความปลอดภัยสูงสุด สำหรับผู้ใช้คนเดียว)
+# ---------------------------------------------------------
+import time # อย่าลืม import time ไว้ด้านบนสุดของไฟล์ด้วยนะครับ (ถ้ายังไม่มี)
+
 def check_password():
+    # กำหนดค่าความปลอดภัย
+    MAX_ATTEMPTS = 5 # จำนวนครั้งสูงสุดที่ยอมให้ใส่ผิด
+    LOCKOUT_DURATION = 180 # เวลาที่ระงับการใช้งานเมื่อใส่ผิดเกิน (หน่วยเป็นวินาที 180 = 3 นาที)
+
+    # สร้างตัวแปรใน session_state เพื่อเก็บค่าต่างๆ
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+    if "login_attempts" not in st.session_state:
+        st.session_state["login_attempts"] = 0
+    if "lockout_time" not in st.session_state:
+        st.session_state["lockout_time"] = 0
+
+    # 1. ตรวจสอบว่าระบบกำลังถูกล็อคอยู่หรือไม่
+    current_time = time.time()
+    if st.session_state["lockout_time"] > current_time:
+        remaining_time = int(st.session_state["lockout_time"] - current_time)
+        st.error(f"🚨 ระบบถูกระงับชั่วคราวเนื่องจากใส่รหัสผิดหลายครั้ง\nกรุณารอ {remaining_time} วินาที แล้วโหลดหน้าเว็บใหม่")
+        return False
+    elif st.session_state["lockout_time"] != 0 and st.session_state["lockout_time"] <= current_time:
+        # หมดเวลาล็อคแล้ว รีเซ็ตจำนวนครั้ง
+        st.session_state["login_attempts"] = 0
+        st.session_state["lockout_time"] = 0
+
     def password_entered():
+        # หากรหัสถูกต้อง
         if st.session_state["password"] == st.secrets["app_password"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]
+            st.session_state["login_attempts"] = 0 # คืนค่าจำนวนครั้ง
+            del st.session_state["password"] # ลบรหัสออกจากหน่วยความจำเพื่อความปลอดภัย
         else:
+            # หากรหัสผิด
             st.session_state["password_correct"] = False
+            st.session_state["login_attempts"] += 1
+            
+            # ถ่วงเวลา 2 วินาที ป้องกันโปรแกรมสุ่มรหัส (Brute-force)
+            time.sleep(2)
 
-    if "password_correct" not in st.session_state:
+            # ตรวจสอบว่าใส่ผิดเกินกำหนดหรือไม่
+            if st.session_state["login_attempts"] >= MAX_ATTEMPTS:
+                st.session_state["lockout_time"] = time.time() + LOCKOUT_DURATION
+                st.session_state["password"] = "" # ล้างช่องใส่รหัส
+
+    # 2. หน้าจอแสดงผลตอนล็อคอิน
+    if not st.session_state["password_correct"]:
         st.header("🔒 กรุณาเข้าสู่ระบบ")
         st.text_input("ใส่รหัสผ่านเพื่อใช้งาน", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.header("🔒 กรุณาเข้าสู่ระบบ")
-        st.text_input("ใส่รหัสผ่านเพื่อใช้งาน", type="password", on_change=password_entered, key="password")
-        st.error("❌ รหัสผ่านไม่ถูกต้อง")
+
+        # แสดงข้อความเตือนเมื่อใส่รหัสผิด
+        if st.session_state["login_attempts"] > 0:
+            attempts_left = MAX_ATTEMPTS - st.session_state["login_attempts"]
+            st.error(f"❌ รหัสผ่านไม่ถูกต้อง (เหลือโอกาสอีก {attempts_left} ครั้ง)")
         return False
     else:
         return True
