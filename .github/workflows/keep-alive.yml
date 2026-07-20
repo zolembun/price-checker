@@ -14,6 +14,12 @@ jobs:
         with:
           python-version: '3.10'
           
+      # 🛠️ 1. เพิ่มขั้นตอนติดตั้งฟอนต์ภาษาไทยให้ Ubuntu
+      - name: Install Thai Fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-thai-tlwg
+          
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -40,21 +46,19 @@ jobs:
               
               print(f'กำลังโหลดหน้าเว็บ: {url}')
               try:
-                  # เปิดหน้าเว็บ รอสูงสุด 2 นาทีเผื่อแอปกำลังตื่น
                   page.goto(url, timeout=120000)
-                  
-                  # พักหายใจ 10 วินาที ให้ชัวร์ว่าองค์ประกอบบนหน้าเว็บโหลดครบ
                   time.sleep(10)
                   
                   print('กำลังค้นหาช่องใส่รหัสผ่าน...')
-                  # ลดเวลารอลงมาที่ 30 วินาที (ถ้า 30 วิยังไม่เจอ แปลว่าติดหน้าอื่นแน่นอน)
-                  page.wait_for_selector('input[type=\"password\"]', timeout=30000)
-                  page.fill('input[type=\"password\"]', password)
+                  # 🛠️ 2. เปลี่ยนมาใช้ ID พิเศษของ Streamlit ในการหาช่องกรอกข้อความ
+                  page.wait_for_selector('[data-testid=\"stTextInput\"] input', timeout=30000)
+                  page.fill('[data-testid=\"stTextInput\"] input', password)
                   
-                  page.press('input[type=\"password\"]', 'Enter')
+                  page.press('[data-testid=\"stTextInput\"] input', 'Enter')
                   
                   print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
-                  page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=60000)
+                  # 🛠️ 3. รอโหลด Tag h1 (st.title) ซึ่งเป็นตัวยืนยันว่าเข้าหน้าหลักสำเร็จ
+                  page.wait_for_selector('h1', timeout=60000)
                   
                   time.sleep(10)
                   print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
@@ -62,9 +66,7 @@ jobs:
               except Exception as e:
                   print(f'❌ ไม่สามารถไปต่อได้: {e}')
                   print('📸 กำลังถ่ายรูปหน้าจอเพื่อใช้เป็นหลักฐาน...')
-                  # สั่งถ่ายรูปหน้าจอแบบเต็มหน้า
                   page.screenshot(path='error_screenshot.png', full_page=True)
-                  # สั่งให้หยุดและแจ้ง GitHub ว่าทำงานไม่สำเร็จ
                   sys.exit(1)
               finally:
                   browser.close()
@@ -73,7 +75,6 @@ jobs:
               run(pw)
           "
           
-      # ขั้นตอนนี้จะทำงานเฉพาะตอนที่สคริปต์ด้านบนเกิด Error เพื่ออัปโหลดรูปภาพให้เราดาวน์โหลด
       - name: Upload Screenshot on Failure
         uses: actions/upload-artifact@v4
         if: failure()
