@@ -29,6 +29,7 @@ jobs:
           from playwright.sync_api import sync_playwright
           import time
           import os
+          import sys
 
           url = os.getenv('APP_URL')
           password = os.getenv('APP_PASSWORD')
@@ -38,26 +39,45 @@ jobs:
               page = browser.new_page()
               
               print(f'กำลังโหลดหน้าเว็บ: {url}')
-              # 🔧 แก้ไขที่ 1: เพิ่มเวลาเปิดเว็บเผื่อแอปหลับลึก (รอสูงสุด 2 นาที)
-              page.goto(url, timeout=120000)
-              
-              print('รอช่องใส่รหัสผ่าน...')
-              # 🔧 แก้ไขที่ 2: เพิ่มเวลารอช่องใส่รหัสผ่าน (รอสูงสุด 2 นาที)
-              page.wait_for_selector('input[type=\"password\"]', timeout=120000)
-              page.fill('input[type=\"password\"]', password)
-              
-              # กดปุ่ม Enter เพื่อล็อกอิน
-              page.press('input[type=\"password\"]', 'Enter')
-              
-              print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
-              # 🔧 แก้ไขที่ 3: เพิ่มเวลารอโหลดหน้าหลักให้ชัวร์ว่าเข้าได้จริง (รอสูงสุด 1 นาที)
-              page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=60000)
-              
-              time.sleep(10)
-              
-              print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
-              browser.close()
+              try:
+                  # เปิดหน้าเว็บ รอสูงสุด 2 นาทีเผื่อแอปกำลังตื่น
+                  page.goto(url, timeout=120000)
+                  
+                  # พักหายใจ 10 วินาที ให้ชัวร์ว่าองค์ประกอบบนหน้าเว็บโหลดครบ
+                  time.sleep(10)
+                  
+                  print('กำลังค้นหาช่องใส่รหัสผ่าน...')
+                  # ลดเวลารอลงมาที่ 30 วินาที (ถ้า 30 วิยังไม่เจอ แปลว่าติดหน้าอื่นแน่นอน)
+                  page.wait_for_selector('input[type=\"password\"]', timeout=30000)
+                  page.fill('input[type=\"password\"]', password)
+                  
+                  page.press('input[type=\"password\"]', 'Enter')
+                  
+                  print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
+                  page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=60000)
+                  
+                  time.sleep(10)
+                  print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
+                  
+              except Exception as e:
+                  print(f'❌ ไม่สามารถไปต่อได้: {e}')
+                  print('📸 กำลังถ่ายรูปหน้าจอเพื่อใช้เป็นหลักฐาน...')
+                  # สั่งถ่ายรูปหน้าจอแบบเต็มหน้า
+                  page.screenshot(path='error_screenshot.png', full_page=True)
+                  # สั่งให้หยุดและแจ้ง GitHub ว่าทำงานไม่สำเร็จ
+                  sys.exit(1)
+              finally:
+                  browser.close()
 
           with sync_playwright() as pw:
               run(pw)
           "
+          
+      # ขั้นตอนนี้จะทำงานเฉพาะตอนที่สคริปต์ด้านบนเกิด Error เพื่ออัปโหลดรูปภาพให้เราดาวน์โหลด
+      - name: Upload Screenshot on Failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: bot-error-screenshot
+          path: error_screenshot.png
+          retention-days: 3
