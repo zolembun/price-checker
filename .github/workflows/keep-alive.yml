@@ -43,38 +43,54 @@ jobs:
               browser = pw.chromium.launch(headless=True)
               page = browser.new_page()
               
-              print(f'กำลังโหลดหน้าเว็บ: {url}')
+              print(f'🌐 กำลังโหลดหน้าเว็บ: {url}')
               try:
                   page.goto(url, timeout=120000)
+                  print('⏳ รอหน้าเว็บโหลดเบื้องต้น 15 วินาที...')
+                  time.sleep(15)
                   
-                  print('รอให้หน้าเว็บโหลดสมบูรณ์ (10 วินาที)...')
-                  time.sleep(10)
+                  # 🛠️ ขั้นตอนพิเศษ: ตรวจสอบและปลุกแอปหากแอปเข้าโหมด Sleep
+                  print('🔍 ตรวจสอบว่าแอปหลับอยู่หรือไม่...')
+                  wake_up_button = page.locator('button:has-text(\"Yes, get this app back up!\")')
                   
-                  print('กำลังค้นหาช่องใส่รหัสผ่าน...')
-                  # 🛠️ ปรับ 1: ใช้เป้าหมายที่แม่นยำที่สุดคือช่อง input ที่เป็นประเภท password
+                  if wake_up_button.count() > 0 and wake_up_button.is_visible():
+                      print('🚨 เจอหน้าจอ App Sleeping! กำลังกดปุ่ม [Yes, get this app back up!] เพื่อปลุกแอป...')
+                      wake_up_button.click()
+                      print('⏳ กดปลุกแล้ว รอระบบเปิดเซิร์ฟเวอร์ใหม่ 45 วินาที...')
+                      time.sleep(45)
+                      # โหลดหน้าเว็บซ้ำอีกครั้งหลังจากปลุกแล้ว
+                      page.goto(url, timeout=120000)
+                      time.sleep(15)
+                  else:
+                      print('👍 ไม่พบหน้าจอแอปหลับ หรือแอปตื่นอยู่แล้ว ดำเนินการต่อไป...')
+
+                  print('🔎 กำลังค้นหาช่องใส่รหัสผ่าน...')
                   pwd_input = page.locator('input[type=\"password\"]')
-                  pwd_input.wait_for(state='visible', timeout=30000)
+                  pwd_input.wait_for(state='visible', timeout=45000)
                   
-                  print('เจอช่องแล้ว กำลังพิมพ์รหัสผ่าน...')
-                  pwd_input.fill(password)
-                  
-                  # 🛠️ ปรับ 2: พัก 1 วินาทีให้ Streamlit (React) รับรู้ว่ามีข้อความถูกพิมพ์แล้ว
+                  print('👆 เจอช่องแล้ว กำลังคลิกและพิมพ์รหัสผ่าน...')
+                  pwd_input.click()
                   time.sleep(1)
                   
-                  print('กำลังกด Enter...')
+                  if password:
+                      pwd_input.press_sequentially(password, delay=150)
+                      print(f'⌨️ พิมพ์รหัสผ่านเรียบร้อย (ความยาว {len(password)} ตัวอักษร)')
+                  else:
+                      print('⚠️ เตือน: ไม่พบตัวแปรรหัสผ่านใน Secrets!')
+                  
+                  time.sleep(2)
+                  print('↩️ กำลังกด Enter เพื่อเข้าสู่ระบบ...')
                   pwd_input.press('Enter')
                   
-                  print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
-                  # รอโหลด Tag h1 ซึ่งเป็นตัวยืนยันว่าเข้าหน้าหลักสำเร็จ
+                  print('⏳ รอโหลดหน้าจอหลักหลักสำเร็จ...')
                   page.wait_for_selector('h1', timeout=60000)
                   
-                  # ให้เวลาระบบดึงข้อมูลจาก Google Sheet เล็กน้อย
-                  time.sleep(5)
-                  print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
+                  time.sleep(10)
+                  print('✅ ภารกิจสำเร็จ! สามารถปลุกและล็อกอินเข้าหน้าหลักแอปตื่นเรียบร้อย!')
                   
               except Exception as e:
-                  print(f'❌ ไม่สามารถไปต่อได้: {e}')
-                  print('📸 กำลังถ่ายรูปหน้าจอเพื่อใช้เป็นหลักฐาน...')
+                  print(f'❌ เกิดข้อผิดพลาดในระบบ: {e}')
+                  print('📸 กำลังบันทึกภาพหน้าจอล่าสุดเป็นหลักฐาน...')
                   page.screenshot(path='error_screenshot.png', full_page=True)
                   sys.exit(1)
               finally:
