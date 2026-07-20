@@ -14,7 +14,6 @@ jobs:
         with:
           python-version: '3.10'
           
-      # 🛠️ 1. เพิ่มขั้นตอนติดตั้งฟอนต์ภาษาไทยให้ Ubuntu
       - name: Install Thai Fonts
         run: |
           sudo apt-get update
@@ -47,20 +46,30 @@ jobs:
               print(f'กำลังโหลดหน้าเว็บ: {url}')
               try:
                   page.goto(url, timeout=120000)
+                  
+                  print('รอให้หน้าเว็บโหลดสมบูรณ์ (10 วินาที)...')
                   time.sleep(10)
                   
                   print('กำลังค้นหาช่องใส่รหัสผ่าน...')
-                  # 🛠️ 2. เปลี่ยนมาใช้ ID พิเศษของ Streamlit ในการหาช่องกรอกข้อความ
-                  page.wait_for_selector('[data-testid=\"stTextInput\"] input', timeout=30000)
-                  page.fill('[data-testid=\"stTextInput\"] input', password)
+                  # 🛠️ ปรับ 1: ใช้เป้าหมายที่แม่นยำที่สุดคือช่อง input ที่เป็นประเภท password
+                  pwd_input = page.locator('input[type=\"password\"]')
+                  pwd_input.wait_for(state='visible', timeout=30000)
                   
-                  page.press('[data-testid=\"stTextInput\"] input', 'Enter')
+                  print('เจอช่องแล้ว กำลังพิมพ์รหัสผ่าน...')
+                  pwd_input.fill(password)
+                  
+                  # 🛠️ ปรับ 2: พัก 1 วินาทีให้ Streamlit (React) รับรู้ว่ามีข้อความถูกพิมพ์แล้ว
+                  time.sleep(1)
+                  
+                  print('กำลังกด Enter...')
+                  pwd_input.press('Enter')
                   
                   print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
-                  # 🛠️ 3. รอโหลด Tag h1 (st.title) ซึ่งเป็นตัวยืนยันว่าเข้าหน้าหลักสำเร็จ
+                  # รอโหลด Tag h1 ซึ่งเป็นตัวยืนยันว่าเข้าหน้าหลักสำเร็จ
                   page.wait_for_selector('h1', timeout=60000)
                   
-                  time.sleep(10)
+                  # ให้เวลาระบบดึงข้อมูลจาก Google Sheet เล็กน้อย
+                  time.sleep(5)
                   print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
                   
               except Exception as e:
