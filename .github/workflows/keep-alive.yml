@@ -23,7 +23,6 @@ jobs:
       - name: Wake up Streamlit with Headless Browser
         env:
           APP_URL: "https://price-checker-c9jbnjxesxzdp8jkujfrjl.streamlit.app/"
-          # ดึงรหัสผ่านที่เราตั้งไว้ใน GitHub Secrets มาใช้งาน
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }} 
         run: |
           python -c "
@@ -39,21 +38,21 @@ jobs:
               page = browser.new_page()
               
               print(f'กำลังโหลดหน้าเว็บ: {url}')
-              page.goto(url)
+              # 🔧 แก้ไขที่ 1: เพิ่มเวลาเปิดเว็บเผื่อแอปหลับลึก (รอสูงสุด 2 นาที)
+              page.goto(url, timeout=120000)
               
               print('รอช่องใส่รหัสผ่าน...')
-              # 1. รอให้ช่องใส่รหัสผ่านโหลดเสร็จ และพิมพ์รหัสผ่านลงไป
-              page.wait_for_selector('input[type=\"password\"]', timeout=15000)
+              # 🔧 แก้ไขที่ 2: เพิ่มเวลารอช่องใส่รหัสผ่าน (รอสูงสุด 2 นาที)
+              page.wait_for_selector('input[type=\"password\"]', timeout=120000)
               page.fill('input[type=\"password\"]', password)
               
-              # 2. กดปุ่ม Enter เพื่อล็อกอิน
+              # กดปุ่ม Enter เพื่อล็อกอิน
               page.press('input[type=\"password\"]', 'Enter')
               
               print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
-              # 3. รอจนกว่าจะเห็นข้อความหัวเว็บ เพื่อยืนยันว่าผ่านหน้า Login มาได้จริงๆ
-              page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=20000)
+              # 🔧 แก้ไขที่ 3: เพิ่มเวลารอโหลดหน้าหลักให้ชัวร์ว่าเข้าได้จริง (รอสูงสุด 1 นาที)
+              page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=60000)
               
-              # 4. ถ่วงเวลา 10 วินาทีให้เซิร์ฟเวอร์รันโค้ดดึงข้อมูล Google Sheet ให้ชัวร์ว่าใช้งานจริง
               time.sleep(10)
               
               print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
