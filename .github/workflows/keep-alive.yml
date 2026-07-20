@@ -9,7 +9,6 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      # อัปเดตเป็น v6 เพื่อแก้ไขคำเตือน Node.js 20 Deprecated
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -24,6 +23,8 @@ jobs:
       - name: Wake up Streamlit with Headless Browser
         env:
           APP_URL: "https://price-checker-c9jbnjxesxzdp8jkujfrjl.streamlit.app/"
+          # ดึงรหัสผ่านที่เราตั้งไว้ใน GitHub Secrets มาใช้งาน
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }} 
         run: |
           python -c "
           from playwright.sync_api import sync_playwright
@@ -31,6 +32,7 @@ jobs:
           import os
 
           url = os.getenv('APP_URL')
+          password = os.getenv('APP_PASSWORD')
 
           def run(pw):
               browser = pw.chromium.launch(headless=True)
@@ -39,9 +41,22 @@ jobs:
               print(f'กำลังโหลดหน้าเว็บ: {url}')
               page.goto(url)
               
+              print('รอช่องใส่รหัสผ่าน...')
+              # 1. รอให้ช่องใส่รหัสผ่านโหลดเสร็จ และพิมพ์รหัสผ่านลงไป
+              page.wait_for_selector('input[type=\"password\"]', timeout=15000)
+              page.fill('input[type=\"password\"]', password)
+              
+              # 2. กดปุ่ม Enter เพื่อล็อกอิน
+              page.press('input[type=\"password\"]', 'Enter')
+              
+              print('กำลังเข้าสู่ระบบและรอโหลดหน้าหลัก...')
+              # 3. รอจนกว่าจะเห็นข้อความหัวเว็บ เพื่อยืนยันว่าผ่านหน้า Login มาได้จริงๆ
+              page.wait_for_selector('text=\"ระบบเช็คราคาสินค้า & AI\"', timeout=20000)
+              
+              # 4. ถ่วงเวลา 10 วินาทีให้เซิร์ฟเวอร์รันโค้ดดึงข้อมูล Google Sheet ให้ชัวร์ว่าใช้งานจริง
               time.sleep(10)
               
-              print('✅ จำลองการเข้าใช้งานสำเร็จ Streamlit ตื่นแล้ว!')
+              print('✅ จำลองการเข้าใช้งานและล็อกอินสำเร็จ Streamlit ตื่นแล้ว!')
               browser.close()
 
           with sync_playwright() as pw:
